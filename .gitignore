@@ -37,10 +37,14 @@ yarn-debug.log*
 yarn-error.log*
 
 # ===== 环境变量与密钥 =====
+# 绝不允许提交：真实数据库口令、JWT 密钥、任何个人配置
 .env
 .env.*
 !.env.example
 application-secret.yml
+# 本地个人配置覆盖文件（每人一份，不入库）
+*local.yml
+*local.yaml
 *.pem
 *.key
 
@@ -48,8 +52,13 @@ application-secret.yml
 *.db
 *.sqlite
 *.sqlite3
+# 数据库导出的真实数据快照（体积大且可能含真实信息）
+*_dump.sql
+*_backup.sql
 
 # ===== 系统 =====
 .DS_Store
 Thumbs.db
 desktop.ini
+*.orig
+*.rej
