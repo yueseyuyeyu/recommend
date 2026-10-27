@@ -1,0 +1,55 @@
+# ===== Java / Maven =====
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+*.class
+*.jar
+*.war
+*.ear
+
+# ===== IDE =====
+.idea/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+bin/
+.vscode/
+*.swp
+
+# ===== Node / 前端 =====
+node_modules/
+dist/
+dist-ssr/
+*.local
+.webcache
+.vite/
+coverage/
+
+# ===== 日志 =====
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ===== 环境变量与密钥 =====
+.env
+.env.*
+!.env.example
+application-secret.yml
+*.pem
+*.key
+
+# ===== 数据库本地文件 =====
+*.db
+*.sqlite
+*.sqlite3
+
+# ===== 系统 =====
+.DS_Store
+Thumbs.db
+desktop.ini
