@@ -104,11 +104,11 @@ RecommendStrategy (策略接口)
 | 工程骨架与构建环境（JDK 17 + Maven Wrapper）                   | ✅ 完成   |
 | 后端编码（entity → mapper → 推荐引擎 → service → controller） | ✅ 完成   |
 | 算法与 Service 单元测试 + 离线评测                              | ✅ 完成   |
-| 前端 Vue 3 界面                                         | ⬜ 待开始  |
+| 前端 Vue 3 界面（登录/首页/商品/详情/购物车/订单/后台）                 | ✅ 完成   |
 
-> 完整可运行的后端实现已提交，并打了 tag `template-v1`。
-> 想动手重写时，建议新开分支（如 `practice`）清空 `recommend-server/src`，
-> 按 [docs/10](docs/10-开发上手指南.md) 的 10 个阶段推进，卡住时对照 `template-v1` 的实现。
+> 完整可运行的前后端实现已提交，并打了 tag `template-v1`。
+> 想动手重写时，建议新开分支（如 `practice`）清空 `recommend-server/src` 与 `recommend-web/src`，
+> 按 [docs/10](docs/10-开发上手指南.md) 的阶段推进，卡住时对照 `template-v1` 的实现。
 
 ---
 
@@ -143,6 +143,15 @@ $env:JWT_SECRET = '至少32位的随机字符串'
 评测接口：`GET /api/recommend/evaluate`（需管理员令牌），返回 Precision / Recall / F1 / Coverage。
 
 ```powershell
+# 4. 启动前端（另开一个终端）
+cd recommend-web
+npm install
+npm run dev        # http://localhost:5173，已配置 /api 代理到 8080
+```
+
+> 若 PowerShell 报「禁止运行脚本」，把 `npm` 换成 `npm.cmd`。
+
+```powershell
 # 跑全部单元测试
 cd recommend-server
 .\mvnw.cmd test
@@ -169,13 +178,22 @@ cd recommend-server
 │   └── 10-开发上手指南.md       环境配置 + 建包顺序 + 编码步骤 + Git 规范
 ├── sql/
 │   └── schema.sql            8 张表建表脚本
-└── recommend-server/         后端服务
-    ├── pom.xml
-    ├── mvnw / mvnw.cmd       Maven Wrapper（锁 3.9.16）
+├── recommend-server/         后端服务
+│   ├── pom.xml
+│   ├── mvnw / mvnw.cmd       Maven Wrapper（锁 3.9.16）
+│   └── src/
+│       ├── main/java/com/deng/recommend/   分层源码（entity/mapper/recommend/service/controller）
+│       ├── main/resources/application.yml  口令与密钥全部走环境变量
+│       └── test/java/                      算法与 Service 单元测试
+│
+└── recommend-web/            前端（Vue 3 + Vite + Element Plus）
+    ├── package.json
+    ├── vite.config.js        /api 代理到 localhost:8080
     └── src/
-        ├── main/java/com/deng/recommend/   分层源码（entity/mapper/recommend/service/controller）
-        ├── main/resources/application.yml  口令与密钥全部走环境变量
-        └── test/java/                      算法与 Service 单元测试
+        ├── api/              统一 axios 封装（自动带 JWT、统一错误提示）
+        ├── router/           路由与登录/管理员守卫
+        ├── stores/           Pinia 用户状态
+        └── views/            登录/注册/首页/商品/详情/购物车/订单/后台
 ```
 
 ---
