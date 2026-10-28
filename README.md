@@ -100,11 +100,13 @@ RecommendStrategy (策略接口)
 | --------------------------------------------------- | ------ |
 | 参考项目分析与问题定位                                         | ✅ 完成   |
 | 需求分析 / 概要设计 / 详细设计 / 数据库设计                           | ✅ 完成   |
-| 数据库表结构（8 张表 + 15 个索引）                               | ✅ 完成   |
+| 数据库表结构（8 张表 + 17 个索引）                               | ✅ 完成   |
 | 工程骨架与构建环境（JDK 17 + Maven Wrapper）                   | ✅ 完成   |
 | 后端编码（entity → mapper → 推荐引擎 → service → controller） | ✅ 完成   |
-| 算法与 Service 单元测试 + 离线评测                              | ✅ 完成   |
+| 算法与 Service 单元测试（85 个用例）                             | ✅ 完成   |
+| 演示数据生成（纯 SQL `seed.sql` + Java 生成器双方案）             | ✅ 完成   |
 | 前端 Vue 3 界面（登录/首页/商品/详情/购物车/订单/后台）                 | ✅ 完成   |
+| 过程文档（00–08 + 10）                                    | ✅ 完成   |
 
 > 完整可运行的前后端实现已提交，并打了 tag `template-v1`。
 > 想动手重写时，建议新开分支（如 `practice`）清空 `recommend-server/src` 与 `recommend-web/src`，
@@ -123,10 +125,15 @@ RecommendStrategy (策略接口)
 ### 三步跑起来（PowerShell）
 
 ```powershell
-# 1. 初始化数据库（建库 + 8 张表）
-& "D:\mysql\mysql-8.0.27-winx64\bin\mysql.exe" -u root -p -e "source sql/schema.sql"
+# 1. 初始化数据库（建库 + 8 张表 + 17 个索引）
+& "D:\mysql\mysql-8.0.27-winx64\bin\mysql.exe" -u root -p `
+    --default-character-set=utf8mb4 -e "source sql/schema.sql"
 
-# 2. 生成可复现的演示数据（200 用户 / 500 商品 / 5000 行为 / 800 订单 / 600 评价）
+# 2A. 灌演示数据（纯 SQL，不用编译后端；必须整文件执行，脚本用了临时表）
+& "D:\mysql\mysql-8.0.27-winx64\bin\mysql.exe" -u root -p `
+    --default-character-set=utf8mb4 recommend_db -e "source sql/seed.sql"
+
+# 2B. 或改用 Java 生成器（可自定义规模：--users=50 --products=100）
 cd recommend-server
 $env:JAVA_HOME = 'D:\java17'
 $env:DB_PASSWORD = '你的 MySQL 口令'
@@ -174,17 +181,21 @@ cd recommend-server
 │   ├── 02-需求规格说明书.md     用例模型、功能/非功能需求
 │   ├── 03-概要设计说明书.md     架构、技术选型、推荐引擎设计
 │   ├── 04-详细设计说明书.md     类/方法/算法/接口/测试的施工图
-│   ├── 05-数据库设计说明书.md    表结构、索引、约束
+│   ├── 05-数据库设计说明书.md    表结构、索引、约束、数据初始化方案
+│   ├── 06-测试计划与报告.md     策略、85 个用例清单、缺陷回归、冒烟清单
+│   ├── 07-部署手册.md          环境变量、建库灌数、jar/Nginx 部署、FAQ
+│   ├── 08-用户手册.md          购物端与管理端操作说明、权限矩阵
 │   └── 10-开发上手指南.md       环境配置 + 建包顺序 + 编码步骤 + Git 规范
 ├── sql/
-│   └── schema.sql            8 张表建表脚本
+│   ├── schema.sql            8 张表 + 17 个索引建表脚本
+│   └── seed.sql              演示数据（纯 SQL，固定规则可复现）
 ├── recommend-server/         后端服务
 │   ├── pom.xml
 │   ├── mvnw / mvnw.cmd       Maven Wrapper（锁 3.9.16）
 │   └── src/
 │       ├── main/java/com/deng/recommend/   分层源码（entity/mapper/recommend/service/controller）
 │       ├── main/resources/application.yml  口令与密钥全部走环境变量
-│       └── test/java/                      算法与 Service 单元测试
+│       └── test/java/                      算法与 Service 单元测试（85 个用例）
 │
 └── recommend-web/            前端（Vue 3 + Vite + Element Plus）
     ├── package.json
