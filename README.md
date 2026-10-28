@@ -103,7 +103,7 @@ RecommendStrategy (策略接口)
 | 数据库表结构（8 张表 + 17 个索引）                               | ✅ 完成   |
 | 工程骨架与构建环境（JDK 17 + Maven Wrapper）                   | ✅ 完成   |
 | 后端编码（entity → mapper → 推荐引擎 → service → controller） | ✅ 完成   |
-| 算法与 Service 单元测试（85 个用例）                             | ✅ 完成   |
+| 算法与 Service 单元测试（90 个用例）                             | ✅ 完成   |
 | 演示数据生成（纯 SQL `seed.sql` + Java 生成器双方案）             | ✅ 完成   |
 | 前端 Vue 3 界面（登录/首页/商品/详情/购物车/订单/后台）                 | ✅ 完成   |
 | 过程文档（00–08 + 10）                                    | ✅ 完成   |
@@ -139,8 +139,8 @@ $env:JAVA_HOME = 'D:\java17'
 $env:DB_PASSWORD = '你的 MySQL 口令'
 .\mvnw.cmd exec:java "-Dexec.args=--reset"
 
-# 3. 启动后端
-$env:JWT_SECRET = '至少32位的随机字符串'
+# 3. 启动后端（JWT_SECRET 必须 ≥ 32 字节；中文占 3 字节，别用中文句子）
+$env:JWT_SECRET = -join ((1..48) | ForEach-Object { [char](Get-Random -Min 33 -Max 126) })
 .\mvnw.cmd spring-boot:run
 ```
 
@@ -182,7 +182,7 @@ cd recommend-server
 │   ├── 03-概要设计说明书.md     架构、技术选型、推荐引擎设计
 │   ├── 04-详细设计说明书.md     类/方法/算法/接口/测试的施工图
 │   ├── 05-数据库设计说明书.md    表结构、索引、约束、数据初始化方案
-│   ├── 06-测试计划与报告.md     策略、85 个用例清单、缺陷回归、冒烟清单
+│   ├── 06-测试计划与报告.md     策略、90 个用例清单、缺陷回归、冒烟清单
 │   ├── 07-部署手册.md          环境变量、建库灌数、jar/Nginx 部署、FAQ
 │   ├── 08-用户手册.md          购物端与管理端操作说明、权限矩阵
 │   └── 10-开发上手指南.md       环境配置 + 建包顺序 + 编码步骤 + Git 规范
@@ -195,7 +195,7 @@ cd recommend-server
 │   └── src/
 │       ├── main/java/com/deng/recommend/   分层源码（entity/mapper/recommend/service/controller）
 │       ├── main/resources/application.yml  口令与密钥全部走环境变量
-│       └── test/java/                      算法与 Service 单元测试（85 个用例）
+│       └── test/java/                      算法与 Service 单元测试（90 个用例）
 │
 └── recommend-web/            前端（Vue 3 + Vite + Element Plus）
     ├── package.json
