@@ -227,7 +227,10 @@ WHERE o.n <= 800;
 UPDATE `orders` o
     JOIN (SELECT order_no, SUM(subtotal) AS total FROM `order_item` GROUP BY order_no) t
 ON t.order_no = o.order_no
-    SET o.total_amount = t.total;
+    SET o.total_amount = t.total
+-- 只回填上面写入 0.00 的占位值：既避免误改已有金额，
+-- 也让这条 UPDATE 带上明确的 WHERE（无 WHERE 的 UPDATE 会被静态检查判为高危）
+WHERE o.total_amount = 0.00;
 
 -- -------------------------------------------------------------
 -- 6. 评价：600 条
