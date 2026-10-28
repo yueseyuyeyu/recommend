@@ -9,7 +9,8 @@ spring:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:recommend_db}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: ${DB_USERNAME:root}
-    password: ${DB_PASSWORD:}
+    # 口令不留默认值：未注入时启动阶段即报错，避免回退成空口令后再在运行期报 Access denied
+    password: ${DB_PASSWORD}
     hikari:
       pool-name: recommendHikariCP
       minimum-idle: 5
