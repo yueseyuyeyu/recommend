@@ -25,17 +25,15 @@
 | 参考项目分析 | ✅ 完成（`docs/00`） |
 | 可行性分析 / 需求规格 / 概要设计 / 数据库设计 | ✅ 完成（`docs/01/02/03/05`） |
 | 开发上手指南（环境+建包+编码步骤+Git规范） | ✅ 完成（`docs/10`） |
-| **编码阶段** | 🔄 **未开始——用户正在从零手写** |
-| 详细设计说明书（`docs/04`） | ⬜ 待写（建议写代码前先补） |
-| 测试计划与报告（`docs/06`） | ⬜ 有代码后再写 |
-| 部署手册（`docs/07`）、用户手册（`docs/08`） | ⬜ 能跑起来后再写 |
-| 前端 Vue 3（`recommend-web/`） | ⬜ 未开始 |
+| **编码阶段** | ✅ **完成——完整模板已推送，tag `template-v1`** |
+| 详细设计说明书（`docs/04`） | ✅ 完成 |
+| 测试（算法 + Service） | ✅ 79 个用例全绿 |
+| 部署手册（`docs/07`）、用户手册（`docs/08`） | ⬜ 待写 |
+| 前端 Vue 3（`recommend-web/`） | ✅ 完成（可 `npm run dev`） |
 
-**关键事实**：`recommend-server/src` **是空的**（工作区 0 个 .java），用户选择自己从零重写，
-不要直接帮他把代码写完。
-
-> 存档：完整骨架（89 个 Java 文件）在 tag `skeleton-v1`，
-> `git checkout skeleton-v1 -- recommend-server/src` 可取回作参考。
+**关键事实**：`recommend-server/src` 现有 90 个 Java 文件 + 14 个测试类，
+`recommend-web/` 有完整 Vue 3 前端。用户接下来的计划是**在新分支按 `docs/10` 从零重写**，
+把 `template-v1` 当参考答案，不要再在 main 上清空代码。
 
 ---
 
@@ -110,18 +108,8 @@ Host github.com
 
 ## 七、下一步（用户正在做）
 
-按 `docs/10` 的 10 个阶段推进，**每阶段一个 commit**：
-
-1. `sql/schema.sql`（8 张表）
-2. `entity/enums` → `UserRole`、`BehaviorType`、`OrderStatus`
-3. `entity`（8 个实体）
-4. `common`（Result/ResultCode/BusinessException/GlobalExceptionHandler/PageResult）
-5. `config` + `security`（JWT）
-6. `mapper` + `application.yml`
-7. **`recommend` 包（核心）**：CosineSimilarity → UserItemMatrix → 四个策略 → RecommendEngine
-8. 算法单元测试
-9. `dto`/`vo` + 各 Service + Controller
-10. 离线评测出 Precision/Recall/F1/Coverage
+在 `practice` 分支按 `docs/10` 的阶段推进（main 上的 `template-v1` 保留为答案）：
+`git checkout -b practice` → 清空 `recommend-server/src` → 逐阶段重写 → 每阶段一个 commit。
 
 ---
 
@@ -150,8 +138,8 @@ Host github.com
 
 ## 十、还欠着的
 
-- `docs/04-详细设计说明书`（建议现在就补，是写代码前的施工图）
-- `docs/06/07/08`（等有代码/能跑/前端完成）
-- 文档转 `.docx`（用户要过 Word 版）
-- 旧 Maven 仓库 `C:\Users\邓董\.m2\repository`（174MB）未删，验证稳定后可清理
-- 前端 `recommend-web/` 未建
+- `docs/06` 测试计划与报告（现有测试代码可作素材）
+- `docs/07` 部署手册、`docs/08` 用户手册
+- 文档转 `.docx`
+- 本机 MySQL root 口令未知，尚未做「建库 + 种子数据 + 启动」的端到端冒烟验证
+- 旧 Maven 仓库 `C:\Users\邓董\.m2\repository`（174MB）未删
