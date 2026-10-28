@@ -1,0 +1,70 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: recommend-server
+  datasource:
+    # 数据库地址与口令一律走环境变量，禁止硬编码（参考项目把 root/明文口令写在 application.properties 中）
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:recommend_db}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
+    hikari:
+      pool-name: recommendHikariCP
+      minimum-idle: 5
+      maximum-pool-size: 20
+      idle-timeout: 30000
+      max-lifetime: 600000
+      connection-timeout: 30000
+      connection-test-query: SELECT 1
+  jackson:
+    default-property-inclusion: non_null
+    time-zone: Asia/Shanghai
+  servlet:
+    multipart:
+      max-file-size: 10MB
+
+# MyBatis-Plus 配置
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      # 逻辑删除：删除操作转为 UPDATE is_deleted = 1
+      logic-delete-field: is_deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  mapper-locations: classpath*:/mapper/**/*.xml
+
+# 推荐引擎参数（全部可配置，禁止在算法里写死魔法数字）
+recommend:
+  default-top-n: 10
+  neighbor-k: 20
+  # ItemCF 热门惩罚因子，0 表示不惩罚
+  popularity-penalty: 0.0
+  user-cf-weight: 0.6
+  item-cf-weight: 0.4
+  hot-days: 30
+  enable-cache: true
+  cache-ttl-seconds: 1800
+  max-behavior-rows: 200000
+
+security:
+  jwt:
+    # 生产环境务必通过环境变量 JWT_SECRET 覆盖，且长度 >= 32 字节
+    secret: ${JWT_SECRET:recommend-system-default-jwt-secret-key-please-change-me}
+    expiration: 86400000
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  level:
+    root: INFO
+    com.deng.recommend: DEBUG
+    com.deng.recommend.mapper: DEBUG
