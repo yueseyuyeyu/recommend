@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -7,7 +7,8 @@ import {
   getProduct,
   getReviews,
   getSimilarRecommend,
-  reportBehavior
+  reportBehavior,
+  submitReview
 } from '../api'
 import { useUserStore } from '../stores/user'
 
@@ -24,6 +25,14 @@ const reviewPageSize = 10
 const quantity = ref(1)
 const loading = ref(false)
 const adding = ref(false)
+const submittingReview = ref(false)
+
+const reviewForm = reactive({
+  rating: 5,
+  content: ''
+})
+
+const rateTexts = ['很差', '较差', '一般', '满意', '非常满意']
 
 const productId = computed(() => Number(route.params.id))
 
@@ -67,6 +76,35 @@ async function loadReviews() {
 function handleReviewPageChange(page) {
   reviewPage.value = page
   loadReviews()
+}
+
+async function handleSubmitReview() {
+  if (!userStore.isLoggedIn) {
+    ElMessage.warning('请先登录后再发表评价')
+    router.push({ path: '/login', query: { redirect: route.fullPath } })
+    return
+  }
+  if (!reviewForm.rating) {
+    ElMessage.warning('请先选择评分')
+    return
+  }
+  submittingReview.value = true
+  try {
+    await submitReview({
+      productId: productId.value,
+      rating: reviewForm.rating,
+      content: reviewForm.content.trim() || null
+    })
+    ElMessage.success('评价已提交')
+    reviewForm.rating = 5
+    reviewForm.content = ''
+    reviewPage.value = 1
+    await loadReviews()
+  } catch {
+    // 重复评价等错误由拦截器统一提示
+  } finally {
+    submittingReview.value = false
+  }
 }
 
 async function handleAddCart() {
@@ -161,6 +199,31 @@ watch(productId, () => loadProduct(), { immediate: true })
       <el-empty v-if="similar.length === 0" description="暂无相似商品推荐" />
 
       <h3 class="section-title">商品评价（{{ reviewTotal }}）</h3>
+      <el-card shadow="never" class="review-form-card">
+        <template #header>发表评价</template>
+        <el-form label-width="72px" @submit.prevent>
+          <el-form-item label="评分">
+            <el-rate v-model="reviewForm.rating" show-text :texts="rateTexts" />
+          </el-form-item>
+          <el-form-item label="内容">
+            <el-input
+              v-model="reviewForm.content"
+              type="textarea"
+              :rows="3"
+              maxlength="500"
+              show-word-limit
+              placeholder="说说这件商品的使用体验（可不填）"
+            />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :loading="submittingReview" @click="handleSubmitReview">
+              提交评价
+            </el-button>
+            <span class="muted">每人每件商品只能评价一次</span>
+          </el-form-item>
+        </el-form>
+      </el-card>
+
       <el-card v-for="review in reviews" :key="review.id" shadow="never" class="review-card">
         <div class="review-head">
           <el-rate :model-value="review.rating" disabled />
@@ -285,6 +348,10 @@ watch(productId, () => loadProduct(), { immediate: true })
 
 .review-card {
   margin-bottom: 12px;
+}
+
+.review-form-card {
+  margin-bottom: 16px;
 }
 
 .review-head {

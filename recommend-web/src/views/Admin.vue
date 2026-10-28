@@ -1,16 +1,37 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getProducts, getStatistics, updateProductStatus } from '../api'
+import {
+  createProduct,
+  deleteCategory,
+  deleteProduct,
+  evaluateRecommend,
+  getAdminOrders,
+  getAdminProducts,
+  getAdminUsers,
+  getCategories,
+  getStatistics,
+  saveCategory,
+  updateOrderStatus,
+  updateProduct,
+  updateProductStatus,
+  updateUserStatus
+} from '../api'
 
+const ORDER_STATUS = [
+  { value: 0, label: '待支付', tag: 'warning' },
+  { value: 1, label: '已支付', tag: 'success' },
+  { value: 2, label: '已发货', tag: 'primary' },
+  { value: 3, label: '已完成', tag: 'info' },
+  { value: 4, label: '已取消', tag: 'info' }
+]
+
+const activeTab = ref('overview')
+
+/* ================= 概览与评测 ================= */
 const stats = ref({})
-const products = ref([])
-const total = ref(0)
-const loading = ref(false)
-const pageNum = ref(1)
-const pageSize = ref(10)
-const relistId = ref(null)
-const actionLoading = ref(false)
+const evaluation = ref(null)
+const evaluating = ref(false)
 
 const statCards = [
   { key: 'userCount', label: '用户数' },
@@ -28,66 +49,388 @@ async function loadStats() {
   }
 }
 
-async function loadProducts() {
-  loading.value = true
+async function handleEvaluate() {
+  evaluating.value = true
   try {
-    // 后台暂无独立的商品列表接口，这里复用前台分页接口（只会返回上架商品）
-    const data = await getProducts({ pageNum: pageNum.value, pageSize: pageSize.value })
-    products.value = data?.records || []
-    total.value = data?.total || 0
+    evaluation.value = await evaluateRecommend(10)
   } catch {
-    products.value = []
-    total.value = 0
+    evaluation.value = null
   } finally {
-    loading.value = false
+    evaluating.value = false
   }
 }
 
-async function changeStatus(row, status) {
-  const action = status === 1 ? '上架' : '下架'
+function percent(value) {
+  return typeof value === 'number' ? `${(value * 100).toFixed(2)}%` : '-'
+}
+
+/* ================= 商品管理 ================= */
+const products = ref([])
+const productTotal = ref(0)
+const productPage = ref(1)
+const productPageSize = ref(10)
+const productLoading = ref(false)
+const productSaving = ref(false)
+const productDialog = ref(false)
+const productFilter = reactive({ keyword: '', status: '' })
+
+const productForm = reactive({
+  id: null,
+  name: '',
+  categoryId: null,
+  subtitle: '',
+  mainImage: '',
+  price: 0,
+  originalPrice: 0,
+  stock: 0,
+  status: 1,
+  description: ''
+})
+
+async function loadProducts() {
+  productLoading.value = true
+  try {
+    const data = await getAdminProducts({
+      keyword: productFilter.keyword.trim() || undefined,
+      status: productFilter.status === '' ? undefined : productFilter.status,
+      pageNum: productPage.value,
+      pageSize: productPageSize.value
+    })
+    products.value = data?.records || []
+    productTotal.value = data?.total || 0
+  } catch {
+    products.value = []
+    productTotal.value = 0
+  } finally {
+    productLoading.value = false
+  }
+}
+
+function handleProductSearch() {
+  productPage.value = 1
+  loadProducts()
+}
+
+function handleProductPageChange(page) {
+  productPage.value = page
+  loadProducts()
+}
+
+function openCreateProduct() {
+  Object.assign(productForm, {
+    id: null,
+    name: '',
+    categoryId: null,
+    subtitle: '',
+    mainImage: '',
+    price: 0,
+    originalPrice: 0,
+    stock: 0,
+    status: 1,
+    description: ''
+  })
+  productDialog.value = true
+}
+
+function openEditProduct(row) {
+  Object.assign(productForm, {
+    id: row.id,
+    name: row.name,
+    categoryId: row.categoryId,
+    subtitle: row.subtitle || '',
+    mainImage: row.mainImage || '',
+    price: Number(row.price) || 0,
+    originalPrice: Number(row.originalPrice) || 0,
+    stock: row.stock ?? 0,
+    status: row.status ?? 1,
+    description: row.description || ''
+  })
+  productDialog.value = true
+}
+
+async function handleSaveProduct() {
+  if (!productForm.name.trim()) {
+    ElMessage.warning('请输入商品名称')
+    return
+  }
+  if (!productForm.categoryId) {
+    ElMessage.warning('请选择类目')
+    return
+  }
+  const payload = {
+    categoryId: productForm.categoryId,
+    name: productForm.name.trim(),
+    subtitle: productForm.subtitle.trim() || null,
+    mainImage: productForm.mainImage.trim() || null,
+    price: productForm.price,
+    originalPrice: productForm.originalPrice || null,
+    stock: productForm.stock,
+    status: productForm.status,
+    description: productForm.description.trim() || null
+  }
+  productSaving.value = true
+  try {
+    if (productForm.id) {
+      await updateProduct(productForm.id, payload)
+      ElMessage.success('商品已更新')
+    } else {
+      await createProduct(payload)
+      ElMessage.success('商品已新增')
+    }
+    productDialog.value = false
+    await Promise.all([loadProducts(), loadStats()])
+  } catch {
+    // 错误提示由拦截器处理
+  } finally {
+    productSaving.value = false
+  }
+}
+
+async function handleToggleProduct(row) {
+  const target = row.status === 1 ? 0 : 1
+  const action = target === 1 ? '上架' : '下架'
   try {
     await ElMessageBox.confirm(`确定${action}商品「${row.name}」吗？`, '提示', { type: 'warning' })
   } catch {
     return
   }
-  actionLoading.value = true
   try {
-    await updateProductStatus(row.id, status)
+    await updateProductStatus(row.id, target)
     ElMessage.success(`已${action}`)
-    await Promise.all([loadProducts(), loadStats()])
+    await loadProducts()
   } catch {
     // 错误提示由拦截器处理
-  } finally {
-    actionLoading.value = false
   }
 }
 
-async function handleRelist() {
-  if (!relistId.value) {
-    ElMessage.warning('请输入要上架的商品 ID')
+async function handleDeleteProduct(row) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除商品「${row.name}」吗？删除为逻辑删除，历史订单不受影响。`,
+      '提示',
+      { type: 'warning' }
+    )
+  } catch {
     return
   }
-  actionLoading.value = true
   try {
-    await updateProductStatus(relistId.value, 1)
-    ElMessage.success('已上架')
-    relistId.value = null
-    pageNum.value = 1
+    await deleteProduct(row.id)
+    ElMessage.success('商品已删除')
     await Promise.all([loadProducts(), loadStats()])
   } catch {
     // 错误提示由拦截器处理
-  } finally {
-    actionLoading.value = false
   }
 }
 
-function handlePageChange(page) {
-  pageNum.value = page
-  loadProducts()
+/* ================= 类目管理 ================= */
+const categories = ref([])
+const categoryOptions = ref([])
+const categoryDialog = ref(false)
+const categorySaving = ref(false)
+const categoryForm = reactive({ name: '', parentId: 0, sortOrder: 0 })
+
+async function loadCategories() {
+  try {
+    const tree = (await getCategories()) || []
+    categories.value = tree
+    const options = []
+    tree.forEach((root) => {
+      options.push({ value: root.id, label: root.name })
+      ;(root.children || []).forEach((child) => {
+        options.push({ value: child.id, label: `　└ ${child.name}` })
+      })
+    })
+    categoryOptions.value = options
+  } catch {
+    categories.value = []
+    categoryOptions.value = []
+  }
 }
+
+function openCreateCategory(parentId = 0) {
+  Object.assign(categoryForm, { name: '', parentId, sortOrder: 0 })
+  categoryDialog.value = true
+}
+
+async function handleSaveCategory() {
+  if (!categoryForm.name.trim()) {
+    ElMessage.warning('请输入类目名称')
+    return
+  }
+  categorySaving.value = true
+  try {
+    await saveCategory({
+      name: categoryForm.name.trim(),
+      parentId: categoryForm.parentId || 0,
+      sortOrder: categoryForm.sortOrder || 0
+    })
+    ElMessage.success('类目已保存')
+    categoryDialog.value = false
+    await loadCategories()
+  } catch {
+    // 错误提示由拦截器处理
+  } finally {
+    categorySaving.value = false
+  }
+}
+
+async function handleDeleteCategory(row) {
+  try {
+    await ElMessageBox.confirm(`确定删除类目「${row.name}」吗？`, '提示', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await deleteCategory(row.id)
+    ElMessage.success('类目已删除')
+    await loadCategories()
+  } catch {
+    // 错误提示由拦截器处理
+  }
+}
+
+/* ================= 用户管理 ================= */
+const users = ref([])
+const userTotal = ref(0)
+const userPage = ref(1)
+const userPageSize = ref(10)
+const userLoading = ref(false)
+const userKeyword = ref('')
+
+async function loadUsers() {
+  userLoading.value = true
+  try {
+    const data = await getAdminUsers({
+      keyword: userKeyword.value.trim() || undefined,
+      pageNum: userPage.value,
+      pageSize: userPageSize.value
+    })
+    users.value = data?.records || []
+    userTotal.value = data?.total || 0
+  } catch {
+    users.value = []
+    userTotal.value = 0
+  } finally {
+    userLoading.value = false
+  }
+}
+
+function handleUserSearch() {
+  userPage.value = 1
+  loadUsers()
+}
+
+function handleUserPageChange(page) {
+  userPage.value = page
+  loadUsers()
+}
+
+async function handleToggleUser(row) {
+  const target = row.status === 1 ? 0 : 1
+  const action = target === 1 ? '启用' : '禁用'
+  try {
+    await ElMessageBox.confirm(`确定${action}用户「${row.username}」吗？`, '提示', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await updateUserStatus(row.id, target)
+    ElMessage.success(`已${action}`)
+    await loadUsers()
+  } catch {
+    // 错误提示由拦截器处理
+  }
+}
+
+/* ================= 订单管理 ================= */
+const adminOrders = ref([])
+const orderTotal = ref(0)
+const orderPage = ref(1)
+const orderPageSize = ref(10)
+const orderLoading = ref(false)
+const orderStatus = ref('')
+
+async function loadAdminOrders() {
+  orderLoading.value = true
+  try {
+    const data = await getAdminOrders({
+      status: orderStatus.value === '' ? undefined : orderStatus.value,
+      pageNum: orderPage.value,
+      pageSize: orderPageSize.value
+    })
+    adminOrders.value = data?.records || []
+    orderTotal.value = data?.total || 0
+  } catch {
+    adminOrders.value = []
+    orderTotal.value = 0
+  } finally {
+    orderLoading.value = false
+  }
+}
+
+function orderStatusLabel(status) {
+  return ORDER_STATUS.find((item) => item.value === status)?.label || '未知'
+}
+
+async function handleOrderStatusChange(row) {
+  try {
+    await ElMessageBox.confirm(
+      `确定把订单 ${row.orderNo} 改为「${orderStatusLabel(row.status)}」吗？`,
+      '提示',
+      { type: 'warning' }
+    )
+  } catch {
+    await loadAdminOrders()
+    return
+  }
+  try {
+    await updateOrderStatus(row.orderNo, row.status)
+    ElMessage.success('订单状态已更新')
+    await Promise.all([loadAdminOrders(), loadStats()])
+  } catch {
+    await loadAdminOrders()
+  }
+}
+
+function statusTag(status) {
+  return ORDER_STATUS.find((item) => item.value === status)?.tag || 'info'
+}
+
+function handleOrderSearch() {
+  orderPage.value = 1
+  loadAdminOrders()
+}
+
+function handleOrderPageChange(page) {
+  orderPage.value = page
+  loadAdminOrders()
+}
+
+function itemsSummary(row) {
+  return (row.items || []).map((item) => `${item.productName}×${item.quantity}`).join('、')
+}
+
+function formatTime(time) {
+  return (time || '').replace('T', ' ')
+}
+
+/* ================= 生命周期 ================= */
+watch(activeTab, (tab) => {
+  if (tab === 'products') {
+    loadProducts()
+    loadCategories()
+  } else if (tab === 'categories') {
+    loadCategories()
+  } else if (tab === 'users') {
+    loadUsers()
+  } else if (tab === 'orders') {
+    loadAdminOrders()
+  }
+})
 
 onMounted(() => {
   loadStats()
+  loadCategories()
   loadProducts()
 })
 </script>
@@ -96,86 +439,354 @@ onMounted(() => {
   <div class="page">
     <h2 class="page-title">后台管理</h2>
 
-    <el-row :gutter="16" class="stat-row">
-      <el-col v-for="card in statCards" :key="card.key" :span="4">
-        <el-card shadow="never" class="stat-card">
-          <div class="muted">{{ card.label }}</div>
-          <div class="stat-value">{{ stats[card.key] ?? '-' }}</div>
+    <el-tabs v-model="activeTab">
+      <!-- ============ 概览 ============ -->
+      <el-tab-pane label="概览" name="overview">
+        <el-row :gutter="16" class="stat-row">
+          <el-col v-for="card in statCards" :key="card.key" :span="4">
+            <el-card shadow="never" class="stat-card">
+              <div class="muted">{{ card.label }}</div>
+              <div class="stat-value">{{ stats[card.key] ?? '-' }}</div>
+            </el-card>
+          </el-col>
+        </el-row>
+
+        <el-card shadow="never">
+          <template #header>
+            <div class="header-row">
+              <span>推荐效果离线评测</span>
+              <el-button type="primary" :loading="evaluating" @click="handleEvaluate">
+                运行评测
+              </el-button>
+            </div>
+          </template>
+          <el-alert
+            type="info"
+            :closable="false"
+            show-icon
+            class="tip"
+            title="采用留出法：80% 行为做训练，20% 做测试，TopN=10，实时计算 Precision / Recall / F1 / 覆盖率。"
+          />
+          <el-descriptions v-if="evaluation" :column="3" border>
+            <el-descriptions-item label="Precision">{{ percent(evaluation.precision) }}</el-descriptions-item>
+            <el-descriptions-item label="Recall">{{ percent(evaluation.recall) }}</el-descriptions-item>
+            <el-descriptions-item label="F1">{{ percent(evaluation.f1) }}</el-descriptions-item>
+            <el-descriptions-item label="覆盖率">
+              {{ percent(evaluation.coverage) }}
+              <span class="muted">
+                （{{ evaluation.recommendedItemCount }}/{{ evaluation.totalItemCount }}）
+              </span>
+            </el-descriptions-item>
+            <el-descriptions-item label="参评用户数">{{ evaluation.evaluatedUserCount }}</el-descriptions-item>
+            <el-descriptions-item label="平均流行度">
+              {{ Number(evaluation.avgPopularity || 0).toFixed(3) }}
+            </el-descriptions-item>
+          </el-descriptions>
+          <el-empty v-else description="点击「运行评测」查看推荐算法指标" />
         </el-card>
-      </el-col>
-    </el-row>
+      </el-tab-pane>
 
-    <el-card shadow="never">
-      <template #header>
-        <div class="header-row">
-          <span>商品上下架</span>
-          <div class="relist">
-            <el-input-number v-model="relistId" :min="1" :controls="false" placeholder="商品 ID" style="width: 120px" />
-            <el-button :loading="actionLoading" @click="handleRelist">按 ID 上架</el-button>
+      <!-- ============ 商品管理 ============ -->
+      <el-tab-pane label="商品管理" name="products">
+        <el-card shadow="never">
+          <template #header>
+            <div class="header-row">
+              <div class="filters">
+                <el-input
+                  v-model="productFilter.keyword"
+                  placeholder="商品名称"
+                  clearable
+                  style="width: 180px"
+                  @keyup.enter="handleProductSearch"
+                />
+                <el-select v-model="productFilter.status" style="width: 130px">
+                  <el-option label="全部状态" value="" />
+                  <el-option label="上架中" :value="1" />
+                  <el-option label="已下架" :value="0" />
+                </el-select>
+                <el-button type="primary" @click="handleProductSearch">查询</el-button>
+              </div>
+              <el-button type="success" @click="openCreateProduct">新增商品</el-button>
+            </div>
+          </template>
+
+          <el-table v-loading="productLoading" :data="products" empty-text="暂无商品">
+            <el-table-column prop="id" label="ID" width="70" />
+            <el-table-column prop="name" label="商品名称" min-width="200" />
+            <el-table-column prop="categoryName" label="类目" width="150" />
+            <el-table-column label="价格" width="110">
+              <template #default="{ row }">
+                <span class="price">￥{{ row.price }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="stock" label="库存" width="80" />
+            <el-table-column prop="sales" label="销量" width="80" />
+            <el-table-column label="状态" width="90">
+              <template #default="{ row }">
+                <el-tag :type="row.status === 1 ? 'success' : 'info'">
+                  {{ row.status === 1 ? '上架中' : '已下架' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="180">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openEditProduct(row)">编辑</el-button>
+                <el-button link :type="row.status === 1 ? 'warning' : 'success'" @click="handleToggleProduct(row)">
+                  {{ row.status === 1 ? '下架' : '上架' }}
+                </el-button>
+                <el-button link type="danger" @click="handleDeleteProduct(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <div class="pagination">
+            <el-pagination
+              layout="total, prev, pager, next"
+              :total="productTotal"
+              :current-page="productPage"
+              :page-size="productPageSize"
+              @current-change="handleProductPageChange"
+            />
           </div>
-        </div>
+        </el-card>
+      </el-tab-pane>
+
+      <!-- ============ 类目管理 ============ -->
+      <el-tab-pane label="类目管理" name="categories">
+        <el-card shadow="never">
+          <template #header>
+            <div class="header-row">
+              <span>两级类目</span>
+              <el-button type="success" @click="openCreateCategory(0)">新增一级类目</el-button>
+            </div>
+          </template>
+
+          <el-table :data="categories" row-key="id" default-expand-all empty-text="暂无类目">
+            <el-table-column prop="name" label="类目名称" min-width="220" />
+            <el-table-column prop="id" label="ID" width="80" />
+            <el-table-column prop="sortOrder" label="排序" width="80" />
+            <el-table-column label="操作" width="200">
+              <template #default="{ row }">
+                <el-button
+                  v-if="row.parentId === 0"
+                  link
+                  type="primary"
+                  @click="openCreateCategory(row.id)"
+                >
+                  新增子类目
+                </el-button>
+                <el-button link type="danger" @click="handleDeleteCategory(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-tab-pane>
+
+      <!-- ============ 用户管理 ============ -->
+      <el-tab-pane label="用户管理" name="users">
+        <el-card shadow="never">
+          <template #header>
+            <div class="header-row">
+              <div class="filters">
+                <el-input
+                  v-model="userKeyword"
+                  placeholder="用户名 / 昵称"
+                  clearable
+                  style="width: 200px"
+                  @keyup.enter="handleUserSearch"
+                />
+                <el-button type="primary" @click="handleUserSearch">查询</el-button>
+              </div>
+              <span class="muted">共 {{ userTotal }} 个用户</span>
+            </div>
+          </template>
+
+          <el-table v-loading="userLoading" :data="users" empty-text="暂无用户">
+            <el-table-column prop="id" label="ID" width="70" />
+            <el-table-column prop="username" label="用户名" width="140" />
+            <el-table-column prop="nickname" label="昵称" width="140" />
+            <el-table-column prop="email" label="邮箱" min-width="200" />
+            <el-table-column label="角色" width="100">
+              <template #default="{ row }">
+                <el-tag :type="row.role === 2 ? 'danger' : 'info'" size="small">
+                  {{ row.role === 2 ? '管理员' : '普通用户' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="90">
+              <template #default="{ row }">
+                <el-tag :type="row.status === 1 ? 'success' : 'info'">
+                  {{ row.status === 1 ? '正常' : '已禁用' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="100">
+              <template #default="{ row }">
+                <el-button
+                  link
+                  :type="row.status === 1 ? 'danger' : 'success'"
+                  :disabled="row.role === 2"
+                  @click="handleToggleUser(row)"
+                >
+                  {{ row.status === 1 ? '禁用' : '启用' }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <div class="pagination">
+            <el-pagination
+              layout="total, prev, pager, next"
+              :total="userTotal"
+              :current-page="userPage"
+              :page-size="userPageSize"
+              @current-change="handleUserPageChange"
+            />
+          </div>
+        </el-card>
+      </el-tab-pane>
+
+      <!-- ============ 订单管理 ============ -->
+      <el-tab-pane label="订单管理" name="orders">
+        <el-card shadow="never">
+          <template #header>
+            <div class="header-row">
+              <div class="filters">
+                <el-select v-model="orderStatus" style="width: 150px">
+                  <el-option label="全部状态" value="" />
+                  <el-option v-for="item in ORDER_STATUS" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+                <el-button type="primary" @click="handleOrderSearch">查询</el-button>
+              </div>
+              <span class="muted">共 {{ orderTotal }} 笔订单</span>
+            </div>
+          </template>
+
+          <el-table v-loading="orderLoading" :data="adminOrders" empty-text="暂无订单">
+            <el-table-column prop="orderNo" label="订单号" width="180" />
+            <el-table-column label="商品" min-width="200">
+              <template #default="{ row }">{{ itemsSummary(row) }}</template>
+            </el-table-column>
+            <el-table-column label="金额" width="110">
+              <template #default="{ row }">
+                <span class="price">￥{{ row.totalAmount }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="当前状态" width="100">
+              <template #default="{ row }">
+                <el-tag :type="statusTag(row.status)">{{ row.statusName }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="变更状态" width="150">
+              <template #default="{ row }">
+                <el-select v-model="row.status" size="small" @change="handleOrderStatusChange(row)">
+                  <el-option v-for="item in ORDER_STATUS" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="下单时间" width="170">
+              <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
+            </el-table-column>
+          </el-table>
+
+          <div class="pagination">
+            <el-pagination
+              layout="total, prev, pager, next"
+              :total="orderTotal"
+              :current-page="orderPage"
+              :page-size="orderPageSize"
+              @current-change="handleOrderPageChange"
+            />
+          </div>
+        </el-card>
+      </el-tab-pane>
+    </el-tabs>
+
+    <!-- ============ 商品编辑弹窗 ============ -->
+    <el-dialog v-model="productDialog" :title="productForm.id ? '编辑商品' : '新增商品'" width="640px">
+      <el-form label-width="90px" @submit.prevent>
+        <el-form-item label="商品名称" required>
+          <el-input v-model="productForm.name" maxlength="200" placeholder="请输入商品名称" />
+        </el-form-item>
+        <el-form-item label="所属类目" required>
+          <el-select v-model="productForm.categoryId" placeholder="请选择类目" style="width: 100%">
+            <el-option
+              v-for="item in categoryOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="副标题">
+          <el-input v-model="productForm.subtitle" maxlength="255" placeholder="选填" />
+        </el-form-item>
+        <el-form-item label="主图 URL">
+          <el-input v-model="productForm.mainImage" maxlength="255" placeholder="选填" />
+        </el-form-item>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="售价">
+              <el-input-number v-model="productForm.price" :min="0" :precision="2" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="原价">
+              <el-input-number v-model="productForm.originalPrice" :min="0" :precision="2" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="12">
+          <el-col :span="12">
+            <el-form-item label="库存">
+              <el-input-number v-model="productForm.stock" :min="0" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="状态">
+              <el-select v-model="productForm.status" style="width: 100%">
+                <el-option label="上架" :value="1" />
+                <el-option label="下架" :value="0" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-form-item label="商品详情">
+          <el-input v-model="productForm.description" type="textarea" :rows="3" placeholder="选填" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="productDialog = false">取消</el-button>
+        <el-button type="primary" :loading="productSaving" @click="handleSaveProduct">保存</el-button>
       </template>
+    </el-dialog>
 
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        class="tip"
-        title="商品列表复用前台接口，仅展示已上架商品；已下架商品可通过上方输入 ID 重新上架。"
-      />
-
-      <el-table v-loading="loading" :data="products" empty-text="暂无商品">
-        <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="name" label="商品名称" min-width="220" />
-        <el-table-column prop="categoryName" label="类目" width="120" />
-        <el-table-column label="价格" width="110">
-          <template #default="{ row }">
-            <span class="price">￥{{ row.price }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="sales" label="销量" width="80" />
-        <el-table-column prop="stock" label="库存" width="80" />
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 1 ? 'success' : 'info'">
-              {{ row.status === 1 ? '上架中' : '已下架' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="100">
-          <template #default="{ row }">
-            <el-button
-              v-if="row.status === 1"
-              link
-              type="danger"
-              :loading="actionLoading"
-              @click="changeStatus(row, 0)"
-            >
-              下架
-            </el-button>
-            <el-button
-              v-else
-              link
-              type="primary"
-              :loading="actionLoading"
-              @click="changeStatus(row, 1)"
-            >
-              上架
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <div class="pagination">
-        <el-pagination
-          layout="total, prev, pager, next"
-          :total="total"
-          :current-page="pageNum"
-          :page-size="pageSize"
-          @current-change="handlePageChange"
-        />
-      </div>
-    </el-card>
+    <!-- ============ 类目编辑弹窗 ============ -->
+    <el-dialog v-model="categoryDialog" title="新增类目" width="420px">
+      <el-form label-width="90px" @submit.prevent>
+        <el-form-item label="类目名称" required>
+          <el-input v-model="categoryForm.name" maxlength="64" placeholder="请输入类目名称" />
+        </el-form-item>
+        <el-form-item label="父级类目">
+          <el-select v-model="categoryForm.parentId" style="width: 100%">
+            <el-option label="无（一级类目）" :value="0" />
+            <el-option
+              v-for="root in categories"
+              :key="root.id"
+              :label="root.name"
+              :value="root.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="排序值">
+          <el-input-number v-model="categoryForm.sortOrder" :min="0" style="width: 100%" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="categoryDialog = false">取消</el-button>
+        <el-button type="primary" :loading="categorySaving" @click="handleSaveCategory">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -198,9 +809,10 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
 }
 
-.relist {
+.filters {
   display: flex;
   align-items: center;
   gap: 8px;

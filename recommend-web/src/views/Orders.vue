@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { cancelOrder, createOrder, getOrders } from '../api'
+import { cancelOrder, createOrder, getOrderDetail, getOrders } from '../api'
 
 const formRef = ref()
 const submitting = ref(false)
@@ -10,6 +10,9 @@ const orders = ref([])
 const total = ref(0)
 const pageNum = ref(1)
 const pageSize = ref(10)
+const detailVisible = ref(false)
+const detailLoading = ref(false)
+const detail = ref(null)
 
 const form = reactive({
   receiverName: '',
@@ -80,6 +83,19 @@ function handlePageChange(page) {
   loadOrders()
 }
 
+async function handleDetail(row) {
+  detailVisible.value = true
+  detailLoading.value = true
+  detail.value = null
+  try {
+    detail.value = await getOrderDetail(row.orderNo)
+  } catch {
+    detailVisible.value = false
+  } finally {
+    detailLoading.value = false
+  }
+}
+
 function itemsSummary(row) {
   return (row.items || []).map((item) => `${item.productName}×${item.quantity}`).join('、')
 }
@@ -145,8 +161,9 @@ onMounted(loadOrders)
         <el-table-column label="下单时间" width="180">
           <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="90">
+        <el-table-column label="操作" width="140">
           <template #default="{ row }">
+            <el-button link type="primary" @click="handleDetail(row)">详情</el-button>
             <el-button
               v-if="row.status === 0 || row.status === 1"
               link
@@ -169,6 +186,41 @@ onMounted(loadOrders)
         />
       </div>
     </el-card>
+
+    <el-dialog v-model="detailVisible" title="订单详情" width="640px">
+      <div v-loading="detailLoading">
+        <template v-if="detail">
+          <el-descriptions :column="2" border size="small">
+            <el-descriptions-item label="订单号" :span="2">{{ detail.orderNo }}</el-descriptions-item>
+            <el-descriptions-item label="状态">
+              <el-tag :type="statusTagType(detail.status)">{{ detail.statusName }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="金额">
+              <span class="price">￥{{ detail.totalAmount }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="收货人">{{ detail.receiverName || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="联系电话">{{ detail.receiverPhone || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="收货地址" :span="2">
+              {{ detail.receiverAddr || '-' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="下单时间" :span="2">
+              {{ formatTime(detail.createTime) }}
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <el-table :data="detail.items || []" size="small" class="detail-items" empty-text="无明细">
+            <el-table-column prop="productName" label="商品" min-width="200" />
+            <el-table-column label="单价" width="100">
+              <template #default="{ row }">￥{{ row.price }}</template>
+            </el-table-column>
+            <el-table-column prop="quantity" label="数量" width="80" />
+            <el-table-column label="小计" width="110">
+              <template #default="{ row }"><span class="price">￥{{ row.subtotal }}</span></template>
+            </el-table-column>
+          </el-table>
+        </template>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -180,6 +232,10 @@ onMounted(loadOrders)
 .pagination {
   display: flex;
   justify-content: center;
+  margin-top: 16px;
+}
+
+.detail-items {
   margin-top: 16px;
 }
 </style>
