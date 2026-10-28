@@ -103,10 +103,11 @@ RecommendStrategy (策略接口)
 | 数据库表结构（8 张表 + 17 个索引）                               | ✅ 完成   |
 | 工程骨架与构建环境（JDK 17 + Maven Wrapper）                   | ✅ 完成   |
 | 后端编码（entity → mapper → 推荐引擎 → service → controller） | ✅ 完成   |
-| 算法与 Service 单元测试（90 个用例）                             | ✅ 完成   |
+| 算法与 Service 单元测试（98 个用例）                             | ✅ 完成   |
 | 演示数据生成（纯 SQL `seed.sql` + Java 生成器双方案）             | ✅ 完成   |
 | 前端 Vue 3 界面（登录/首页/商品/详情/购物车/订单/后台）                 | ✅ 完成   |
-| 过程文档（00–08 + 10）                                    | ✅ 完成   |
+| 过程文档（00–10）                                          | ✅ 完成   |
+| 项目总结报告（目标达成 / 算法指标 / 踩坑复盘 / 后续规划）       | ✅ 完成   |
 
 > 完整可运行的前后端实现已提交，并打了 tag `template-v1`。
 > 想动手重写时，建议新开分支（如 `practice`）清空 `recommend-server/src` 与 `recommend-web/src`，
@@ -182,9 +183,10 @@ cd recommend-server
 │   ├── 03-概要设计说明书.md     架构、技术选型、推荐引擎设计
 │   ├── 04-详细设计说明书.md     类/方法/算法/接口/测试的施工图
 │   ├── 05-数据库设计说明书.md    表结构、索引、约束、数据初始化方案
-│   ├── 06-测试计划与报告.md     策略、90 个用例清单、缺陷回归、冒烟清单
+│   ├── 06-测试计划与报告.md     策略、98 个用例清单、缺陷回归、冒烟清单
 │   ├── 07-部署手册.md          环境变量、建库灌数、jar/Nginx 部署、FAQ
 │   ├── 08-用户手册.md          购物端与管理端操作说明、权限矩阵
+│   ├── 09-项目总结报告.md       目标达成、算法指标、踩坑复盘、后续规划
 │   └── 10-开发上手指南.md       环境配置 + 建包顺序 + 编码步骤 + Git 规范
 ├── sql/
 │   ├── schema.sql            8 张表 + 17 个索引建表脚本
@@ -195,7 +197,7 @@ cd recommend-server
 │   └── src/
 │       ├── main/java/com/deng/recommend/   分层源码（entity/mapper/recommend/service/controller）
 │       ├── main/resources/application.yml  口令与密钥全部走环境变量
-│       └── test/java/                      算法与 Service 单元测试（90 个用例）
+│       └── test/java/                      算法与 Service 单元测试（98 个用例）
 │
 └── recommend-web/            前端（Vue 3 + Vite + Element Plus）
     ├── package.json
