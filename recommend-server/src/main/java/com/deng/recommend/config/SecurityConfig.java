@@ -64,6 +64,8 @@ public class SecurityConfig {
                                 "/api/recommend/similar/**").permitAll()
                         // 接口文档公开
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
+                        // 健康检查公开（仅 health/info 被暴露，其余 actuator 端点仍须认证）
+                        .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                         // 后台管理接口与算法评测仅管理员
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/recommend/evaluate").hasRole("ADMIN")

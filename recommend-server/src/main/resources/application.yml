@@ -64,6 +64,18 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
 
+# 运维监控：只暴露健康与信息端点
+# env / configprops / heapdump 等端点会带出环境变量与堆内存明文，严禁对外暴露
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      # 仅登录用户可见各 indicator 详情，匿名访问只返回 UP/DOWN
+      show-details: when-authorized
+
 logging:
   level:
     root: INFO

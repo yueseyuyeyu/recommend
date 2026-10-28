@@ -87,6 +87,12 @@
             <version>${springdoc.version}</version>
         </dependency>
 
+        <!-- 运维监控：健康检查（仅暴露 health/info，见 application.yml） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+
         <!-- 工具 -->
         <dependency>
             <groupId>org.projectlombok</groupId>
