@@ -10,6 +10,8 @@ target/
 
 # ===== IDE =====
 .idea/
+# IDEA 共享运行配置目录（勾选 Store as project file 时生成，可能含明文环境变量）
+.run/
 *.iml
 *.ipr
 *.iws
