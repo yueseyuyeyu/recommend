@@ -82,7 +82,7 @@ INSERT INTO `category` (id, name, parent_id, sort_order) VALUES
 
 -- -------------------------------------------------------------
 -- 2. 用户：id=1 管理员，id=2..201 普通用户
---    口令一律 BCrypt(10) 哈希，脚本内不出现任何明文口令哈希
+--    口令一律 BCrypt(10) 哈希，脚本内不出现明文口令
 --    admin123 -> id=1，123456 -> id=2..201
 -- -------------------------------------------------------------
 INSERT INTO `user` (id, username, password_hash, nickname, email, role, status) VALUES
