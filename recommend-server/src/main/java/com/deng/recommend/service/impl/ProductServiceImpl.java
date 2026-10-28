@@ -7,7 +7,9 @@ import com.deng.recommend.common.BusinessException;
 import com.deng.recommend.common.PageResult;
 import com.deng.recommend.common.ResultCode;
 import com.deng.recommend.dto.ProductQuery;
+import com.deng.recommend.entity.Category;
 import com.deng.recommend.entity.Product;
+import com.deng.recommend.mapper.CategoryMapper;
 import com.deng.recommend.mapper.ProductMapper;
 import com.deng.recommend.service.ProductService;
 import com.deng.recommend.vo.ProductVO;
@@ -19,6 +21,7 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -33,6 +36,7 @@ import java.util.stream.Collectors;
 public class ProductServiceImpl implements ProductService {
 
     private final ProductMapper productMapper;
+    private final CategoryMapper categoryMapper;
 
     @Override
     public PageResult<ProductVO> page(ProductQuery query, long pageNum, long pageSize) {
@@ -50,8 +54,9 @@ public class ProductServiceImpl implements ProductService {
         PageResult<Product> pageResult = PageResult.of(page);
 
         // 实体转 VO 后重建分页对象，保留原分页元信息
+        Map<Long, String> categoryNames = loadCategoryNames();
         List<ProductVO> records = pageResult.getRecords().stream()
-                .map(ProductVO::from)
+                .map(product -> toVO(product, categoryNames))
                 .collect(Collectors.toList());
         return new PageResult<>(pageResult.getPageNum(), pageResult.getPageSize(),
                 pageResult.getTotal(), records);
@@ -66,7 +71,7 @@ public class ProductServiceImpl implements ProductService {
         if (!product.isOnSale()) {
             throw new BusinessException(ResultCode.PRODUCT_OFF_SHELF);
         }
-        return ProductVO.from(product);
+        return toVO(product, loadCategoryNames());
     }
 
     @Override
@@ -77,6 +82,20 @@ public class ProductServiceImpl implements ProductService {
         return productMapper.selectBatchIds(ids).stream()
                 .map(ProductVO::from)
                 .collect(Collectors.toCollection(ArrayList::new));
+    }
+
+    /**
+     * 类目表规模很小（两级几十条），一次查全量做内存映射，避免逐行查库。
+     */
+    private Map<Long, String> loadCategoryNames() {
+        return categoryMapper.selectList(null).stream()
+                .collect(Collectors.toMap(Category::getId, Category::getName));
+    }
+
+    private ProductVO toVO(Product product, Map<Long, String> categoryNames) {
+        ProductVO vo = ProductVO.from(product);
+        vo.setCategoryName(categoryNames.get(product.getCategoryId()));
+        return vo;
     }
 
     /**
