@@ -1,0 +1,101 @@
+package com.deng.recommend.controller.admin;
+
+import com.deng.recommend.common.PageResult;
+import com.deng.recommend.common.Result;
+import com.deng.recommend.entity.Category;
+import com.deng.recommend.entity.Product;
+import com.deng.recommend.service.AdminService;
+import com.deng.recommend.vo.OrderVO;
+import com.deng.recommend.vo.ProductVO;
+import com.deng.recommend.vo.UserVO;
+import lombok.RequiredArgsConstructor;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Map;
+
+/**
+ * 后台管理接口，全部要求 ADMIN 角色（规则见 {@code SecurityConfig}）。
+ */
+@Validated
+@RestController
+@RequestMapping("/api/admin")
+@RequiredArgsConstructor
+public class AdminController {
+
+    private final AdminService adminService;
+
+    @PostMapping("/products")
+    public Result<ProductVO> createProduct(@RequestBody Product product) {
+        product.setId(null);
+        return Result.success(adminService.saveProduct(product));
+    }
+
+    @PutMapping("/products/{id}")
+    public Result<ProductVO> updateProduct(@PathVariable Long id, @RequestBody Product product) {
+        product.setId(id);
+        return Result.success(adminService.saveProduct(product));
+    }
+
+    @DeleteMapping("/products/{id}")
+    public Result<Void> deleteProduct(@PathVariable Long id) {
+        adminService.deleteProduct(id);
+        return Result.success();
+    }
+
+    @PutMapping("/products/{id}/status")
+    public Result<Void> updateProductStatus(@PathVariable Long id, @RequestParam Integer status) {
+        adminService.updateProductStatus(id, status);
+        return Result.success();
+    }
+
+    @PostMapping("/categories")
+    public Result<Long> saveCategory(@RequestBody Category category) {
+        return Result.success(adminService.saveCategory(category));
+    }
+
+    @DeleteMapping("/categories/{id}")
+    public Result<Void> deleteCategory(@PathVariable Long id) {
+        adminService.deleteCategory(id);
+        return Result.success();
+    }
+
+    @GetMapping("/users")
+    public Result<PageResult<UserVO>> pageUsers(@RequestParam(required = false) String keyword,
+                                                @RequestParam(defaultValue = "1") long pageNum,
+                                                @RequestParam(defaultValue = "20") long pageSize) {
+        return Result.success(adminService.pageUsers(keyword, pageNum, pageSize));
+    }
+
+    @PutMapping("/users/{id}/status")
+    public Result<Void> updateUserStatus(@PathVariable Long id, @RequestParam Integer status) {
+        adminService.updateUserStatus(id, status);
+        return Result.success();
+    }
+
+    @GetMapping("/orders")
+    public Result<PageResult<OrderVO>> pageOrders(@RequestParam(required = false) Integer status,
+                                                  @RequestParam(defaultValue = "1") long pageNum,
+                                                  @RequestParam(defaultValue = "20") long pageSize) {
+        return Result.success(adminService.pageOrders(status, pageNum, pageSize));
+    }
+
+    @PutMapping("/orders/{orderNo}/status")
+    public Result<Void> updateOrderStatus(@PathVariable String orderNo, @RequestParam Integer status) {
+        adminService.updateOrderStatus(orderNo, status);
+        return Result.success();
+    }
+
+    @GetMapping("/statistics")
+    public Result<Map<String, Object>> statistics() {
+        return Result.success(adminService.statistics());
+    }
+}
