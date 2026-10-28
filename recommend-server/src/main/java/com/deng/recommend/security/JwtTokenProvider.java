@@ -22,6 +22,9 @@ import java.util.Date;
 @Component
 public class JwtTokenProvider {
 
+    /** RFC 7518 §3.2：HMAC-SHA 算法要求密钥长度 ≥ 256 bit */
+    private static final int MIN_SECRET_BYTES = 32;
+
     private final SecretKey secretKey;
 
     /** 令牌有效期（毫秒），默认 24 小时 */
@@ -29,7 +32,17 @@ public class JwtTokenProvider {
 
     public JwtTokenProvider(@Value("${security.jwt.secret}") String secret,
                             @Value("${security.jwt.expiration:86400000}") long expirationMillis) {
-        this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        byte[] keyBytes = secret == null ? new byte[0] : secret.getBytes(StandardCharsets.UTF_8);
+        // jjwt 自己的 WeakKeyException 只说“密钥不够强”，看不出该改哪个变量、差多少字节，
+        // 因此启动时直接给出可操作的中文提示，避免部署时才发现启动失败。
+        if (keyBytes.length < MIN_SECRET_BYTES) {
+            throw new IllegalStateException("JWT 密钥长度不足：当前 " + keyBytes.length
+                    + " 字节，HMAC-SHA256 要求至少 " + MIN_SECRET_BYTES + " 字节。"
+                    + "请通过环境变量 JWT_SECRET 注入随机串（中文占 3 字节，别直接用中文句子），"
+                    + "例如 PowerShell: $env:JWT_SECRET = -join ((1..48) | ForEach-Object "
+                    + "{ [char](Get-Random -Min 33 -Max 126) })");
+        }
+        this.secretKey = Keys.hmacShaKeyFor(keyBytes);
         this.expirationMillis = expirationMillis;
     }
 
