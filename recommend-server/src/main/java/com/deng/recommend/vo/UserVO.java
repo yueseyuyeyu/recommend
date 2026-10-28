@@ -29,6 +29,9 @@ public class UserVO {
     /** 角色码：1-普通用户，2-管理员 */
     private Integer role;
 
+    /** 状态码：1-正常，0-禁用；后台用户管理需要展示与切换 */
+    private Integer status;
+
     /** 登录成功后下发的 JWT 令牌，仅登录/注册接口返回 */
     private String token;
 }

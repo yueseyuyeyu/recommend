@@ -51,6 +51,14 @@ public class AdminController {
         return Result.success();
     }
 
+    @GetMapping("/products")
+    public Result<PageResult<ProductVO>> pageProducts(@RequestParam(required = false) String keyword,
+                                                     @RequestParam(required = false) Integer status,
+                                                     @RequestParam(defaultValue = "1") long pageNum,
+                                                     @RequestParam(defaultValue = "20") long pageSize) {
+        return Result.success(adminService.pageProducts(keyword, status, pageNum, pageSize));
+    }
+
     @PutMapping("/products/{id}/status")
     public Result<Void> updateProductStatus(@PathVariable Long id, @RequestParam Integer status) {
         adminService.updateProductStatus(id, status);

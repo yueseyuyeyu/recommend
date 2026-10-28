@@ -40,6 +40,20 @@ public interface AdminService {
     void updateProductStatus(Long id, Integer status);
 
     /**
+     * 分页查询商品（后台，含已下架商品）。
+     *
+     * <p>前台分页接口只返回上架商品，后台需要管理全部商品，
+     * 因此单独提供本方法，避免管理员改错状态后商品从列表里消失。
+     *
+     * @param keyword  商品名称关键字，可为空
+     * @param status   上下架状态，为空表示不限
+     * @param pageNum  页码
+     * @param pageSize 每页条数
+     * @return 分页商品列表，含类目名称
+     */
+    PageResult<ProductVO> pageProducts(String keyword, Integer status, long pageNum, long pageSize);
+
+    /**
      * 新增或更新类目。
      *
      * @param category 类目实体，id 为空表示新增

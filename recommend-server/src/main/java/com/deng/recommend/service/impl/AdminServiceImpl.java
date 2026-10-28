@@ -101,6 +101,28 @@ public class AdminServiceImpl implements AdminService {
     }
 
     @Override
+    public PageResult<ProductVO> pageProducts(String keyword, Integer status, long pageNum, long pageSize) {
+        LambdaQueryWrapper<Product> wrapper = new LambdaQueryWrapper<Product>()
+                .like(StringUtils.hasText(keyword), Product::getName, keyword)
+                .eq(status != null, Product::getStatus, status)
+                .orderByDesc(Product::getCreateTime)
+                .orderByDesc(Product::getId);
+        Page<Product> page = productMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
+
+        // 类目表规模很小，一次查全量做内存映射，避免逐行联表
+        Map<Long, String> categoryNames = categoryMapper.selectList(null).stream()
+                .collect(Collectors.toMap(Category::getId, Category::getName));
+        List<ProductVO> records = page.getRecords().stream()
+                .map(product -> {
+                    ProductVO vo = ProductVO.from(product);
+                    vo.setCategoryName(categoryNames.get(product.getCategoryId()));
+                    return vo;
+                })
+                .collect(Collectors.toList());
+        return PageResult.of(page, records);
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public Long saveCategory(Category category) {
         if (!StringUtils.hasText(category.getName())) {
@@ -254,6 +276,7 @@ public class AdminServiceImpl implements AdminService {
                 .email(user.getEmail())
                 .avatar(user.getAvatar())
                 .role(user.getRole())
+                .status(user.getStatus())
                 .build();
     }
 
