@@ -99,15 +99,16 @@ RecommendStrategy (策略接口)
 | 阶段                                                  | 状态     |
 | --------------------------------------------------- | ------ |
 | 参考项目分析与问题定位                                         | ✅ 完成   |
-| 需求分析 / 概要设计 / 数据库设计                                 | ✅ 完成   |
+| 需求分析 / 概要设计 / 详细设计 / 数据库设计                           | ✅ 完成   |
 | 数据库表结构（8 张表 + 15 个索引）                               | ✅ 完成   |
 | 工程骨架与构建环境（JDK 17 + Maven Wrapper）                   | ✅ 完成   |
-| 后端编码（entity → mapper → 推荐引擎 → service → controller） | 🔄 进行中 |
-| 算法单元测试 + 离线评测                                       | ⬜ 待开始  |
+| 后端编码（entity → mapper → 推荐引擎 → service → controller） | ✅ 完成   |
+| 算法与 Service 单元测试 + 离线评测                              | ✅ 完成   |
 | 前端 Vue 3 界面                                         | ⬜ 待开始  |
 
-> 代码正在按 [10 个阶段](docs/10-开发上手指南.md#三编码步骤共-10-个阶段每阶段一个-git-commit)逐步重写，  
-> 每个阶段一个 commit。`src` 目前是空的，骨架存档在 tag `skeleton-v1`。
+> 完整可运行的后端实现已提交，并打了 tag `template-v1`。
+> 想动手重写时，建议新开分支（如 `practice`）清空 `recommend-server/src`，
+> 按 [docs/10](docs/10-开发上手指南.md) 的 10 个阶段推进，卡住时对照 `template-v1` 的实现。
 
 ---
 
@@ -119,22 +120,33 @@ RecommendStrategy (策略接口)
 - MySQL 8.0+
 - Node.js 18+（前端阶段才需要）
 
-### 三步跑起来
+### 三步跑起来（PowerShell）
 
-```bash
-# 1. 初始化数据库
-mysql -u root -p < sql/schema.sql
+```powershell
+# 1. 初始化数据库（建库 + 8 张表）
+& "D:\mysql\mysql-8.0.27-winx64\bin\mysql.exe" -u root -p -e "source sql/schema.sql"
 
-# 2. 配置环境变量（不要直接改 application.yml）
-cp .env.example .env
-# 编辑 .env 填入 DB_PASSWORD 和 JWT_SECRET
+# 2. 生成可复现的演示数据（200 用户 / 500 商品 / 5000 行为 / 800 订单 / 600 评价）
+cd recommend-server
+$env:JAVA_HOME = 'D:\java17'
+$env:DB_PASSWORD = '你的 MySQL 口令'
+.\mvnw.cmd exec:java "-Dexec.args=--reset"
 
 # 3. 启动后端
-cd recommend-server
-./mvnw spring-boot:run
+$env:JWT_SECRET = '至少32位的随机字符串'
+.\mvnw.cmd spring-boot:run
 ```
 
+演示账号：`admin / admin123`（管理员）、`user001 / 123456`（普通用户）。
+
 启动后打开 <http://localhost:8080/swagger-ui.html> 查看接口文档。
+评测接口：`GET /api/recommend/evaluate`（需管理员令牌），返回 Precision / Recall / F1 / Coverage。
+
+```powershell
+# 跑全部单元测试
+cd recommend-server
+.\mvnw.cmd test
+```
 
 > 详细的环境配置（IDEA 怎么配 JDK、Maven、UTF-8、Lombok）见  
 > [docs/10-开发上手指南.md](docs/10-开发上手指南.md)。
@@ -152,6 +164,7 @@ cd recommend-server
 │   ├── 01-可行性分析报告.md
 │   ├── 02-需求规格说明书.md     用例模型、功能/非功能需求
 │   ├── 03-概要设计说明书.md     架构、技术选型、推荐引擎设计
+│   ├── 04-详细设计说明书.md     类/方法/算法/接口/测试的施工图
 │   ├── 05-数据库设计说明书.md    表结构、索引、约束
 │   └── 10-开发上手指南.md       环境配置 + 建包顺序 + 编码步骤 + Git 规范
 ├── sql/
@@ -160,6 +173,9 @@ cd recommend-server
     ├── pom.xml
     ├── mvnw / mvnw.cmd       Maven Wrapper（锁 3.9.16）
     └── src/
+        ├── main/java/com/deng/recommend/   分层源码（entity/mapper/recommend/service/controller）
+        ├── main/resources/application.yml  口令与密钥全部走环境变量
+        └── test/java/                      算法与 Service 单元测试
 ```
 
 ---
