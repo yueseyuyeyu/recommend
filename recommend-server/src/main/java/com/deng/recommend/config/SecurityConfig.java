@@ -55,12 +55,14 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // 认证接口公开
                         .requestMatchers("/api/auth/**").permitAll()
-                        // 商品浏览、类目、评价、热门与相似推荐公开
+                        // 商品浏览、类目、评价、轮播图、热门与相似推荐公开
                         .requestMatchers(HttpMethod.GET,
                                 "/api/products/**",
                                 "/api/categories/**",
                                 "/api/reviews/**",
+                                "/api/carousels",
                                 "/api/recommend/hot",
+                                "/api/recommend/feed",
                                 "/api/recommend/similar/**").permitAll()
                         // 接口文档公开
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
