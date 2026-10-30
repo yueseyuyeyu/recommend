@@ -29,9 +29,18 @@ export const useUserStore = defineStore('user', () => {
       id: data.id,
       username: data.username,
       nickname: data.nickname,
+      avatar: data.avatar,
       role: data.role
     }
     localStorage.setItem(TOKEN_KEY, token.value)
+    localStorage.setItem(USER_KEY, JSON.stringify(userInfo.value))
+  }
+
+  /**
+   * 资料修改后同步本地缓存，让导航栏头像与昵称立刻更新，无需重新登录。
+   */
+  function patchUserInfo(patch) {
+    userInfo.value = { ...(userInfo.value || {}), ...patch }
     localStorage.setItem(USER_KEY, JSON.stringify(userInfo.value))
   }
 
@@ -54,5 +63,5 @@ export const useUserStore = defineStore('user', () => {
     localStorage.removeItem(USER_KEY)
   }
 
-  return { token, userInfo, isLoggedIn, isAdmin, login, register, logout }
+  return { token, userInfo, isLoggedIn, isAdmin, login, register, logout, patchUserInfo }
 })

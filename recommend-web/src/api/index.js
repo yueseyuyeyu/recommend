@@ -4,6 +4,14 @@ import http from './http'
 export const login = (data) => http.post('/auth/login', data)
 export const register = (data) => http.post('/auth/register', data)
 
+/* ===== 个人中心 ===== */
+export const getUserProfile = () => http.get('/user/profile')
+export const updateUserProfile = (data) => http.put('/user/profile', data)
+export const getUserStats = () => http.get('/user/stats')
+/** type: VIEW（浏览过，含点击）或 PURCHASE（买过） */
+export const getUserHistory = (type = 'VIEW', pageNum = 1, pageSize = 12) =>
+  http.get('/user/history', { params: { type, pageNum, pageSize } })
+
 /* ===== 商品与类目 ===== */
 export const getProducts = (params) => http.get('/products', { params })
 export const getProduct = (id) => http.get(`/products/${id}`)

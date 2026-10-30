@@ -17,6 +17,12 @@ const activeMenu = computed(() => {
   return route.path
 })
 
+/** 无头像时用昵称/用户名首字兜底 */
+const avatarText = computed(() => {
+  const name = userStore.userInfo?.nickname || userStore.userInfo?.username || '?'
+  return name.trim().charAt(0).toUpperCase()
+})
+
 /** 登录状态变化时同步收藏数据：登录则加载，退出则清空 */
 watch(
   () => userStore.isLoggedIn,
@@ -69,7 +75,13 @@ onMounted(() => {
 
       <div class="user-area">
         <template v-if="userStore.isLoggedIn">
-          <span class="muted">{{ userStore.userInfo?.nickname || userStore.userInfo?.username }}</span>
+          <!-- 头像 + 昵称整体可点，进入个人中心 -->
+          <div class="user-chip" @click="router.push('/profile')">
+            <el-avatar :size="26" :src="userStore.userInfo?.avatar || undefined" class="chip-avatar">
+              {{ avatarText }}
+            </el-avatar>
+            <span class="muted">{{ userStore.userInfo?.nickname || userStore.userInfo?.username }}</span>
+          </div>
           <el-tag v-if="userStore.isAdmin" size="small" type="danger">管理员</el-tag>
           <el-button link type="primary" @click="handleLogout">退出</el-button>
         </template>
@@ -150,5 +162,27 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   white-space: nowrap;
+}
+
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 3px;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.user-chip:hover {
+  background: #f5f7fa;
+}
+
+.chip-avatar {
+  background: #ff5000;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  flex: 0 0 auto;
 }
 </style>
