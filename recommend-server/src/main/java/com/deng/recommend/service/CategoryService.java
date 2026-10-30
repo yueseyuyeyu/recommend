@@ -31,4 +31,14 @@ public interface CategoryService {
      * @return ID 集合；入参为 null 时返回空列表
      */
     List<Long> selfAndDescendantIds(Long categoryId);
+
+    /**
+     * 全量「类目 ID → 所属一级类目 ID」索引。
+     *
+     * <p>推荐多样性打散时，需要知道每个商品挂在哪个一级类目下。
+     * 类目总量很小（几百），一次性构建远比逐条向上查便宜。
+     *
+     * @return 一级类目自己的 value 也是它自己
+     */
+    java.util.Map<Long, Long> categoryTopIndex();
 }

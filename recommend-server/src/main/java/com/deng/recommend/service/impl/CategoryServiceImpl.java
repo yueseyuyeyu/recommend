@@ -92,6 +92,34 @@ public class CategoryServiceImpl implements CategoryService {
         return new ArrayList<>(collected);
     }
 
+    @Override
+    public Map<Long, Long> categoryTopIndex() {
+        List<Category> all = categoryMapper.selectList(new LambdaQueryWrapper<Category>()
+                .select(Category::getId, Category::getParentId));
+
+        Map<Long, Long> parentByChild = new HashMap<>();
+        for (Category category : all) {
+            parentByChild.put(category.getId(), category.getParentId());
+        }
+
+        Map<Long, Long> index = new HashMap<>();
+        for (Long id : parentByChild.keySet()) {
+            Long current = id;
+            int hops = 0;
+            // 一直向上走到根；hop 上限兜住数据异常造成的环
+            while (current != null && current != 0L && hops < 10) {
+                Long next = parentByChild.get(current);
+                if (next == null || next == 0L) {
+                    break;
+                }
+                current = next;
+                hops++;
+            }
+            index.put(id, current);
+        }
+        return index;
+    }
+
     /**
      * 递归挂载子类目。层级深度由数据决定，代码不设上限。
      */

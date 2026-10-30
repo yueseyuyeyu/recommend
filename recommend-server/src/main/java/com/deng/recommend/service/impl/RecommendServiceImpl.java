@@ -13,6 +13,7 @@ import com.deng.recommend.recommend.model.BehaviorRecord;
 import com.deng.recommend.recommend.model.ScoredItem;
 import com.deng.recommend.recommend.model.UserItemMatrix;
 import com.deng.recommend.service.BehaviorService;
+import com.deng.recommend.service.CategoryService;
 import com.deng.recommend.service.RecommendService;
 import com.deng.recommend.vo.FeedPageVO;
 import com.deng.recommend.vo.ProductVO;
@@ -52,6 +53,7 @@ public class RecommendServiceImpl implements RecommendService {
     private final BehaviorService behaviorService;
     private final BehaviorMapper behaviorMapper;
     private final ProductMapper productMapper;
+    private final CategoryService categoryService;
     private final RecommendProperties properties;
 
     /** 游客排行池的缓存键 */
@@ -71,9 +73,39 @@ public class RecommendServiceImpl implements RecommendService {
     public List<RecommendVO> recommendForUser(Long userId, int topN) {
         int size = normalizeTopN(topN);
         UserItemMatrix matrix = behaviorService.buildMatrix(null);
+
+        // 冷启动：几乎没有行为的用户跑协同过滤，找出来的邻居不可信。
+        // 此时跳过算法，直接用「全站热门 + 类目打散」，理由文案也换成冷启动专属的。
+        if (isColdUser(matrix, userId)) {
+            int candidateSize = Math.min(size * 3, 60);
+            List<Long> exclude = userId == null
+                    ? new ArrayList<>()
+                    : buildExcludeIds(userId);
+            List<ScoredItem> hot = recommendEngine.recommendHot(matrix, candidateSize, exclude);
+            List<RecommendVO> result = toRecommendVOs(hot, size, true);
+            for (RecommendVO item : result) {
+                item.setReason("全站热门好物，逛得越多推荐越准");
+            }
+            return result;
+        }
+
+        int candidateSize = Math.min(size * 3, 60);
         List<ScoredItem> scoredItems = recommendEngine.recommendForUser(
-                matrix, userId, size, buildExcludeIds(userId));
-        return toRecommendVOs(scoredItems);
+                matrix, userId, candidateSize, buildExcludeIds(userId));
+        return toRecommendVOs(scoredItems, size, true);
+    }
+
+    /**
+     * 判断是否为冷启动用户。
+     *
+     * <p>游客与行为数不足阈值的新注册用户都算；没有行为记录的也算，
+     * 统一走热门路径，避免为 0 条行为单独写一条分支。
+     */
+    private boolean isColdUser(UserItemMatrix matrix, Long userId) {
+        if (userId == null) {
+            return true;
+        }
+        return matrix.getUserItems(userId).size() < properties.getColdStartMinInteractions();
     }
 
     @Override
@@ -82,17 +114,77 @@ public class RecommendServiceImpl implements RecommendService {
         UserItemMatrix matrix = behaviorService.buildMatrix(null);
         List<Long> exclude = new ArrayList<>(findOffShelfProductIds());
         exclude.add(itemId);
-        List<ScoredItem> scoredItems = recommendEngine.recommendSimilar(matrix, itemId, size, exclude);
-        return toRecommendVOs(scoredItems);
+        List<ScoredItem> scoredItems = new ArrayList<>(
+                recommendEngine.recommendSimilarRaw(matrix, itemId, size, exclude));
+        // 新商品没有交互记录时 ItemCF 无从下手，用同品类热门商品补位，
+        // 比全站热门更贴合「相似」这个语义
+        scoredItems = supplementWithSameCategory(scoredItems, itemId, size);
+        // 品类补位仍不足时，最后才用全站热门兜底，保证页面没有空位
+        if (scoredItems.size() < size) {
+            java.util.Set<Long> picked = new java.util.HashSet<>();
+            for (ScoredItem item : scoredItems) {
+                picked.add(item.getItemId());
+            }
+            for (ScoredItem hot : recommendEngine.recommendHot(matrix, size * 2, exclude)) {
+                if (scoredItems.size() >= size) {
+                    break;
+                }
+                if (!picked.contains(hot.getItemId())) {
+                    picked.add(hot.getItemId());
+                    scoredItems.add(hot);
+                }
+            }
+        }
+        // 注意：相似推荐不能做类目打散——同一个类目恰恰是"相似"的来源
+        return toRecommendVOs(scoredItems, size, false);
+    }
+
+    /**
+     * 相似推荐结果不足时，用同品类热门商品补齐。
+     *
+     * @param items  ItemCF 的结果（可能为空）
+     * @param itemId 源商品 ID
+     * @param limit  目标条数
+     */
+    private List<ScoredItem> supplementWithSameCategory(List<ScoredItem> items, Long itemId, int limit) {
+        if (items.size() >= limit) {
+            return items;
+        }
+
+        Product source = productMapper.selectById(itemId);
+        if (source == null) {
+            return items;
+        }
+
+        List<ScoredItem> result = new ArrayList<>(items);
+        java.util.Set<Long> alreadyPicked = new java.util.HashSet<>();
+        for (ScoredItem item : items) {
+            alreadyPicked.add(item.getItemId());
+        }
+        alreadyPicked.add(itemId);
+
+        List<Product> sameCategory = productMapper.selectList(
+                new LambdaQueryWrapper<Product>()
+                        .eq(Product::getCategoryId, source.getCategoryId())
+                        .eq(Product::getStatus, 1)
+                        .notIn(Product::getId, alreadyPicked)
+                        .orderByDesc(Product::getSales)
+                        .last("LIMIT " + (limit - items.size())));
+
+        for (Product product : sameCategory) {
+            result.add(new ScoredItem(product.getId(), 0.0, "同品类热门商品"));
+        }
+        return result;
     }
 
     @Override
     public List<RecommendVO> recommendHot(int topN) {
         int size = normalizeTopN(topN);
         UserItemMatrix matrix = behaviorService.buildMatrix(hotWindowStart());
+        int candidateSize = Math.min(size * 3, 60);
         List<ScoredItem> scoredItems = recommendEngine.recommendHot(
-                matrix, size, findOffShelfProductIds());
-        return toRecommendVOs(scoredItems);
+                matrix, candidateSize, findOffShelfProductIds());
+        return toRecommendVOs(scoredItems, size, true);
     }
 
     @Override
@@ -267,6 +359,17 @@ public class RecommendServiceImpl implements RecommendService {
      * 将算法输出的商品 ID 批量转换为视图对象，并严格保持推荐分降序。
      */
     private List<RecommendVO> toRecommendVOs(List<ScoredItem> scoredItems) {
+        return toRecommendVOs(scoredItems, Integer.MAX_VALUE, false);
+    }
+
+    /**
+     * 把打分结果转成视图。
+     *
+     * @param scoredItems 打分结果，已按分数降序
+     * @param limit       最终返回条数上限
+     * @param diversify   是否按一级类目做多样性打散
+     */
+    private List<RecommendVO> toRecommendVOs(List<ScoredItem> scoredItems, int limit, boolean diversify) {
         if (scoredItems == null || scoredItems.isEmpty()) {
             return new ArrayList<>();
         }
@@ -282,20 +385,76 @@ public class RecommendServiceImpl implements RecommendService {
             productMap.put(product.getId(), ProductVO.from(product));
         }
 
-        List<RecommendVO> result = new ArrayList<>(scoredItems.size());
-        Map<Long, ScoredItem> scoreMap = new HashMap<>();
-        for (ScoredItem item : scoredItems) {
-            scoreMap.put(item.getItemId(), item);
-        }
+        // 先把下架/缺失的过滤掉再打散，避免已下架商品占掉类目配额
+        List<ScoredItem> ordered = new ArrayList<>(scoredItems.size());
         for (ScoredItem item : scoredItems) {
             ProductVO product = productMap.get(item.getItemId());
-            // 商品不存在或已下架则跳过
-            if (product == null || !Integer.valueOf(1).equals(product.getStatus())) {
-                continue;
+            if (product != null && Integer.valueOf(1).equals(product.getStatus())) {
+                ordered.add(item);
             }
-            result.add(RecommendVO.of(product, item));
+        }
+
+        if (diversify) {
+            ordered = diversify(ordered, productMap, limit);
+        }
+
+        List<RecommendVO> result = new ArrayList<>(ordered.size());
+        for (ScoredItem item : ordered) {
+            result.add(RecommendVO.of(productMap.get(item.getItemId()), item));
         }
         return result;
+    }
+
+    /**
+     * 多样性打散：同一一级类目尽量不超过 {@code diversify-max-per-category} 条。
+     *
+     * <p>逐个挑选「分数最高且未超配额」的候选；若剩余候选全部超配额，
+     * 说明类目覆盖面不足以撑满 limit，此时把配额放宽 1 再挑——
+     * 保证最终条数不缩水，配额只是"尽量满足"。
+     *
+     * <p>第一版的缺陷：把超配额的候选收集起来最后补齐，当候选集中在
+     * 少数类目时，补齐环节会把配额击穿（实测母婴玩具回到 9/20）。
+     */
+    private List<ScoredItem> diversify(List<ScoredItem> items, Map<Long, ProductVO> productMap, int limit) {
+        int baseQuota = properties.getDiversifyMaxPerCategory();
+        if (baseQuota <= 0 || items.size() <= limit) {
+            return items;
+        }
+
+        Map<Long, Long> topIndex = categoryService.categoryTopIndex();
+
+        // (候选, 所属一级类目)，类目缺失的归入 -1 桶
+        List<Map.Entry<ScoredItem, Long>> remaining = new ArrayList<>(items.size());
+        for (ScoredItem item : items) {
+            ProductVO product = productMap.get(item.getItemId());
+            Long topId = product == null ? null : topIndex.get(product.getCategoryId());
+            remaining.add(new java.util.AbstractMap.SimpleEntry<>(
+                    item, topId == null ? Long.valueOf(-1) : topId));
+        }
+
+        List<ScoredItem> picked = new ArrayList<>(limit);
+        Map<Long, Integer> counts = new HashMap<>();
+        int quota = baseQuota;
+
+        while (picked.size() < limit && !remaining.isEmpty()) {
+            int chosenIndex = -1;
+            for (int i = 0; i < remaining.size(); i++) {
+                Long bucket = remaining.get(i).getValue();
+                if (counts.getOrDefault(bucket, 0) < quota) {
+                    chosenIndex = i;
+                    break;
+                }
+            }
+            if (chosenIndex < 0) {
+                // 剩余候选全部超配额，放宽 1 再挑
+                quota++;
+                continue;
+            }
+            Map.Entry<ScoredItem, Long> chosen = remaining.remove(chosenIndex);
+            picked.add(chosen.getKey());
+            counts.merge(chosen.getValue(), 1, Integer::sum);
+        }
+        return picked;
     }
 
     private java.time.LocalDateTime hotWindowStart() {

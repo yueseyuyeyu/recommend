@@ -61,7 +61,10 @@ public class RecommendEngine {
     }
 
     /**
-     * 商品详情页相似推荐：优先 ItemCF，不足或异常时用热门补足。
+     * 商品详情页相似推荐：优先 ItemCF，异常时降级为热门推荐。
+     *
+     * <p>与 {@link #recommendSimilarRaw} 的区别：本方法会用全站热门补足结果，
+     * 适合"必须凑满 N 个"的页面；需要按品类补位时改用 Raw 版本。
      */
     public List<ScoredItem> recommendSimilar(UserItemMatrix matrix, Long itemId, int topN, List<Long> excludeItemIds) {
         RecommendRequest request = RecommendRequest.builder()
@@ -98,6 +101,25 @@ public class RecommendEngine {
                 .build();
         return executeWithFallback(matrix, request, "混合推荐",
                 () -> hybridStrategy.recommend(matrix, request));
+    }
+
+    /**
+     * 相似推荐（不自动用热门补足）。
+     *
+     * <p>相似推荐的补位语义是「同品类热门」而不是「全站热门」，
+     * 所以关掉引擎的通用补位，由上层按品类补——
+     * 否则新商品还没有交互记录时，ItemCF 返回空，
+     * 引擎会立刻用全站热门把结果填满，品类补位根本没有机会触发。
+     */
+    public List<ScoredItem> recommendSimilarRaw(UserItemMatrix matrix, Long itemId,
+                                                int topN, List<Long> excludeItemIds) {
+        RecommendRequest request = RecommendRequest.builder()
+                .itemId(itemId)
+                .topN(topN)
+                .excludeItemIds(excludeItemIds)
+                .build();
+        return executeWithFallback(matrix, request, "ItemCF 相似推荐",
+                () -> itemCFStrategy.recommend(matrix, request), false);
     }
 
     /**
