@@ -37,6 +37,12 @@ public class User {
     /** 邮箱 */
     private String email;
 
+    /** 手机号 */
+    private String phone;
+
+    /** 默认收货地址 */
+    private String address;
+
     /** 头像 URL */
     private String avatar;
 

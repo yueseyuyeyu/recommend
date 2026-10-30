@@ -34,6 +34,8 @@ CREATE TABLE `user` (
   `password_hash`    VARCHAR(100) NOT NULL                COMMENT 'BCrypt加盐哈希，绝不存明文',
   `nickname`         VARCHAR(64)  DEFAULT NULL            COMMENT '昵称',
   `email`            VARCHAR(128) DEFAULT NULL            COMMENT '邮箱',
+  `phone`            VARCHAR(32)  DEFAULT NULL            COMMENT '手机号',
+  `address`          VARCHAR(255) DEFAULT NULL            COMMENT '默认收货地址',
   `avatar`           VARCHAR(255) DEFAULT NULL            COMMENT '头像URL',
   `role`             TINYINT      NOT NULL DEFAULT 1      COMMENT '角色：1-普通用户，2-管理员',
   `status`           TINYINT      NOT NULL DEFAULT 1      COMMENT '状态：1-正常，0-禁用',

@@ -92,6 +92,8 @@ public class AuthServiceImpl implements AuthService {
                 .username(user.getUsername())
                 .nickname(user.getNickname())
                 .email(user.getEmail())
+                .phone(user.getPhone())
+                .address(user.getAddress())
                 .avatar(user.getAvatar())
                 .role(user.getRole());
         if (withToken && StringUtils.hasText(user.getUsername())) {

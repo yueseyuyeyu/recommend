@@ -24,6 +24,12 @@ public class UserVO {
 
     private String email;
 
+    /** 手机号 */
+    private String phone;
+
+    /** 默认收货地址 */
+    private String address;
+
     private String avatar;
 
     /** 角色码：1-普通用户，2-管理员 */
