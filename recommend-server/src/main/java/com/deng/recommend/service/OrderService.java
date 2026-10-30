@@ -104,4 +104,15 @@ public interface OrderService {
      * @param orderNo 订单号
      */
     void cancelByAdmin(String orderNo);
+
+    /**
+     * 自动确认超时未收货的订单。
+     *
+     * <p>买家一直不点确认收货，订单会永久停在「已发货」，交易无法完结。
+     * 发货满指定天数后由本方法自动置为「已完成」。
+     *
+     * @param days 发货后多少天自动确认，小于等于 0 表示不处理
+     * @return 本轮确认的订单数
+     */
+    int confirmExpiredReceipts(int days);
 }

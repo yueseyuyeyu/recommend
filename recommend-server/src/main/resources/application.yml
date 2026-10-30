@@ -75,6 +75,10 @@ order:
   # 定时任务首次延迟与扫描间隔（毫秒）
   auto-cancel-initial-delay-ms: 120000
   auto-cancel-interval-ms: 300000
+  # 发货后多少天自动确认收货；0 关闭自动确认，且管理员可随时确认
+  auto-receipt-days: ${ORDER_AUTO_RECEIPT_DAYS:7}
+  auto-receipt-initial-delay-ms: 120000
+  auto-receipt-interval-ms: 1800000
 
 springdoc:
   api-docs:
