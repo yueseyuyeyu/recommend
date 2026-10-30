@@ -84,6 +84,9 @@ export const createOrder = (data) => http.post('/orders', data)
 export const getOrders = (params) => http.get('/orders', { params })
 export const getOrderDetail = (orderNo) => http.get(`/orders/${orderNo}`)
 export const cancelOrder = (orderNo) => http.post(`/orders/${orderNo}/cancel`)
+/** 支付订单，payType: 1-支付宝 2-微信支付 3-银行卡 */
+export const payOrder = (orderNo, payType) =>
+  http.post(`/orders/${orderNo}/pay`, null, { params: { payType } })
 
 /* ===== 后台 ===== */
 export const getStatistics = () => http.get('/admin/statistics')

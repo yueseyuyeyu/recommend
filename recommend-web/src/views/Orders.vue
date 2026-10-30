@@ -1,12 +1,10 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { cancelOrder, createOrder, getAddresses, getOrderDetail, getOrders } from '../api'
+import { cancelOrder, getOrderDetail, getOrders } from '../api'
 
 const router = useRouter()
-const formRef = ref()
-const submitting = ref(false)
 const loading = ref(false)
 const orders = ref([])
 const total = ref(0)
@@ -15,37 +13,6 @@ const pageSize = ref(10)
 const detailVisible = ref(false)
 const detailLoading = ref(false)
 const detail = ref(null)
-
-/** 收货地址簿；选择 0 表示手动填写新地址 */
-const addresses = ref([])
-const selectedAddressId = ref(0)
-
-const form = reactive({
-  receiverName: '',
-  receiverPhone: '',
-  receiverAddr: ''
-})
-
-const rules = {
-  receiverName: [{ required: true, message: '请输入收货人', trigger: 'blur' }],
-  receiverPhone: [
-    { required: true, message: '请输入联系电话', trigger: 'blur' },
-    { pattern: /^1\d{10}$/, message: '请输入 11 位手机号', trigger: 'blur' }
-  ],
-  receiverAddr: [{ required: true, message: '请输入收货地址', trigger: 'blur' }]
-}
-
-/** 加载地址簿，默认选中默认地址 */
-async function loadAddresses() {
-  try {
-    addresses.value = (await getAddresses()) || []
-    const preferred = addresses.value.find((item) => item.isDefault === 1) || addresses.value[0]
-    selectedAddressId.value = preferred ? preferred.id : 0
-  } catch {
-    addresses.value = []
-    selectedAddressId.value = 0
-  }
-}
 
 async function loadOrders() {
   loading.value = true
@@ -61,33 +28,9 @@ async function loadOrders() {
   }
 }
 
-async function handleCreate() {
-  let payload
-
-  if (selectedAddressId.value) {
-    // 选了地址簿里的地址：只传 ID，收货信息由服务端回查，前端改不动
-    payload = { addressId: selectedAddressId.value }
-  } else {
-    try {
-      await formRef.value.validate()
-    } catch {
-      return
-    }
-    payload = { ...form }
-  }
-
-  submitting.value = true
-  try {
-    const orderNo = await createOrder(payload)
-    ElMessage.success(`下单成功，订单号：${orderNo}`)
-    formRef.value?.resetFields()
-    pageNum.value = 1
-    await loadOrders()
-  } catch {
-    // 错误提示由拦截器处理
-  } finally {
-    submitting.value = false
-  }
+/** 去收银台付款；本页只做订单查看与状态操作，不承担下单职责 */
+function handlePay(row) {
+  router.push(`/pay/${row.orderNo}`)
 }
 
 async function handleCancel(row) {
@@ -135,74 +78,15 @@ function formatTime(time) {
   return (time || '').replace('T', ' ')
 }
 
-onMounted(() => {
-  loadOrders()
-  loadAddresses()
-})
+onMounted(loadOrders)
 </script>
 
 <template>
   <div class="page">
-    <h2 class="page-title">我的订单</h2>
-
-    <el-card shadow="never" class="create-card">
-      <template #header>
-        <div class="create-head">
-          <span>提交订单</span>
-          <el-button link type="primary" size="small" @click="router.push('/profile')">
-            管理收货地址
-          </el-button>
-        </div>
-      </template>
-
-      <!-- 地址簿存在时优先选地址 -->
-      <el-radio-group v-if="addresses.length" v-model="selectedAddressId" class="address-radios">
-        <el-radio v-for="row in addresses" :key="row.id" :value="row.id" class="address-radio">
-          <span class="addr-line">
-            <b>{{ row.receiverName }}</b>
-            <span class="muted">{{ row.receiverPhone }}</span>
-            <el-tag v-if="row.isDefault === 1" size="small" type="danger">默认</el-tag>
-          </span>
-          <span class="addr-detail">{{ row.detailAddress }}</span>
-        </el-radio>
-        <el-radio :value="0" class="address-radio">
-          <span class="addr-line"><b>手动填写新地址</b></span>
-        </el-radio>
-      </el-radio-group>
-
-      <!-- 未选地址（或无地址）时手填 -->
-      <el-form
-        v-if="!selectedAddressId"
-        ref="formRef"
-        :model="form"
-        :rules="rules"
-        label-width="88px"
-        @submit.prevent
-      >
-        <el-row :gutter="16">
-          <el-col :span="8">
-            <el-form-item label="收货人" prop="receiverName">
-              <el-input v-model="form.receiverName" placeholder="请输入收货人" clearable />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="联系电话" prop="receiverPhone">
-              <el-input v-model="form.receiverPhone" placeholder="请输入手机号" clearable />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="收货地址" prop="receiverAddr">
-              <el-input v-model="form.receiverAddr" placeholder="请输入收货地址" clearable />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-
-      <div class="submit-row">
-        <el-button type="primary" :loading="submitting" @click="handleCreate">提交订单</el-button>
-        <span class="muted">下单将结算购物车中已勾选的商品</span>
-      </div>
-    </el-card>
+    <div class="page-head">
+      <h2 class="page-title">我的订单</h2>
+      <span class="muted">下单请前往购物车结算</span>
+    </div>
 
     <el-card shadow="never">
       <el-table v-loading="loading" :data="orders" empty-text="暂无订单">
@@ -220,12 +104,20 @@ onMounted(() => {
             <el-tag :type="statusTagType(row.status)">{{ row.statusName }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="下单时间" width="180">
+        <el-table-column label="支付方式" width="110">
+          <template #default="{ row }">
+            <span class="muted">{{ row.payTypeName || '—' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="下单时间" width="170">
           <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="140">
+        <el-table-column label="操作" width="190">
           <template #default="{ row }">
             <el-button link type="primary" @click="handleDetail(row)">详情</el-button>
+            <el-button v-if="row.status === 0" link type="warning" @click="handlePay(row)">
+              去支付
+            </el-button>
             <el-button
               v-if="row.status === 0 || row.status === 1"
               link
@@ -287,8 +179,10 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.create-card {
-  margin-bottom: 16px;
+.page-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
 }
 
 .pagination {
@@ -299,63 +193,6 @@ onMounted(() => {
 
 .detail-items {
   margin-top: 16px;
-}
-
-/* 收货地址选择 */
-.create-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.address-radios {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-bottom: 16px;
-}
-
-/* 让单选项变成整行卡片，纵向排布收货信息 */
-.address-radio {
-  height: auto;
-  align-items: flex-start;
-  margin-right: 0;
-  padding: 10px 14px;
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
-  width: 100%;
-  transition: border-color 0.15s, background 0.15s;
-}
-
-.address-radio:hover {
-  border-color: #ffd0b8;
-  background: #fffaf7;
-}
-
-.address-radio :deep(.el-radio__label) {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  white-space: normal;
-  line-height: 1.5;
-}
-
-.addr-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-}
-
-.addr-detail {
-  font-size: 13px;
-  color: #606266;
-}
-
-.submit-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
 }
 
 .muted {

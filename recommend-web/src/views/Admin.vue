@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   createCarousel,
@@ -228,29 +228,61 @@ async function handleDeleteProduct(row) {
 }
 
 /* ================= 类目管理 ================= */
+const MAX_CATEGORY_LEVEL = 3
+
 const categories = ref([])
 const categoryOptions = ref([])
+/** id -> 层级，用于表格展示与「还能不能再往下加」的判断 */
+const categoryLevels = ref({})
 const categoryDialog = ref(false)
 const categorySaving = ref(false)
 const categoryForm = reactive({ name: '', parentId: 0, sortOrder: 0 })
+
+/**
+ * 递归拍平类目树。
+ *
+ * 用全角空格做缩进，是为了在原生 el-select 下拉里也能看出层级；
+ * 同时把每个节点的层级记下来，表格和「新增子类目」按钮都要用。
+ */
+function flattenTree(nodes, depth = 1, options = [], levels = {}) {
+  for (const node of nodes) {
+    const prefix = depth === 1 ? '' : `${'　'.repeat(depth - 1)}└ `
+    options.push({ value: node.id, label: `${prefix}${node.name}`, depth })
+    levels[node.id] = depth
+    if (node.children && node.children.length) {
+      flattenTree(node.children, depth + 1, options, levels)
+    }
+  }
+  return { options, levels }
+}
 
 async function loadCategories() {
   try {
     const tree = (await getCategories()) || []
     categories.value = tree
-    const options = []
-    tree.forEach((root) => {
-      options.push({ value: root.id, label: root.name })
-      ;(root.children || []).forEach((child) => {
-        options.push({ value: child.id, label: `　└ ${child.name}` })
-      })
-    })
+    const { options, levels } = flattenTree(tree)
     categoryOptions.value = options
+    categoryLevels.value = levels
   } catch {
     categories.value = []
     categoryOptions.value = []
+    categoryLevels.value = {}
   }
 }
+
+function levelOf(row) {
+  return categoryLevels.value[row.id] || 1
+}
+
+function levelName(level) {
+  return ['一级', '二级', '三级', '四级'][level - 1] || `${level} 级`
+}
+
+/** 父级选定后，将要创建的层级 */
+const pendingLevelName = computed(() => {
+  if (!categoryForm.parentId) return '一级'
+  return levelName((categoryLevels.value[categoryForm.parentId] || 1) + 1)
+})
 
 function openCreateCategory(parentId = 0) {
   Object.assign(categoryForm, { name: '', parentId, sortOrder: 0 })
@@ -685,25 +717,39 @@ onMounted(() => {
         <el-card shadow="never">
           <template #header>
             <div class="header-row">
-              <span>两级类目</span>
+              <span>三级类目（一级 → 二级 → 三级）</span>
               <el-button type="success" @click="openCreateCategory(0)">新增一级类目</el-button>
             </div>
           </template>
 
-          <el-table :data="categories" row-key="id" default-expand-all empty-text="暂无类目">
+          <el-table
+            :data="categories"
+            row-key="id"
+            :tree-props="{ children: 'children' }"
+            default-expand-all
+            empty-text="暂无类目"
+          >
             <el-table-column prop="name" label="类目名称" min-width="220" />
+            <el-table-column label="层级" width="90" align="center">
+              <template #default="{ row }">
+                <el-tag :type="levelOf(row) === 1 ? 'danger' : levelOf(row) === 2 ? 'warning' : 'info'" size="small">
+                  {{ levelName(levelOf(row)) }}
+                </el-tag>
+              </template>
+            </el-table-column>
             <el-table-column prop="id" label="ID" width="80" />
             <el-table-column prop="sortOrder" label="排序" width="80" />
-            <el-table-column label="操作" width="200">
+            <el-table-column label="操作" width="220">
               <template #default="{ row }">
                 <el-button
-                  v-if="row.parentId === 0"
+                  v-if="levelOf(row) < MAX_CATEGORY_LEVEL"
                   link
                   type="primary"
                   @click="openCreateCategory(row.id)"
                 >
                   新增子类目
                 </el-button>
+                <span v-else class="muted">已达末级</span>
                 <el-button link type="danger" @click="handleDeleteCategory(row)">删除</el-button>
               </template>
             </el-table-column>
@@ -981,7 +1027,7 @@ onMounted(() => {
     </el-dialog>
 
     <!-- ============ 类目编辑弹窗 ============ -->
-    <el-dialog v-model="categoryDialog" title="新增类目" width="420px">
+    <el-dialog v-model="categoryDialog" title="新增类目" width="440px">
       <el-form label-width="90px" @submit.prevent>
         <el-form-item label="类目名称" required>
           <el-input v-model="categoryForm.name" maxlength="64" placeholder="请输入类目名称" />
@@ -990,12 +1036,19 @@ onMounted(() => {
           <el-select v-model="categoryForm.parentId" style="width: 100%">
             <el-option label="无（一级类目）" :value="0" />
             <el-option
-              v-for="root in categories"
-              :key="root.id"
-              :label="root.name"
-              :value="root.id"
+              v-for="option in categoryOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+              :disabled="option.depth >= MAX_CATEGORY_LEVEL"
             />
           </el-select>
+          <div class="form-hint">
+            将创建为「{{ pendingLevelName }}」类目
+            <template v-if="categoryForm.parentId && (categoryLevels[categoryForm.parentId] || 1) >= MAX_CATEGORY_LEVEL">
+              —— 该父级已是末级，不能再往下加
+            </template>
+          </div>
         </el-form-item>
         <el-form-item label="排序值">
           <el-input-number v-model="categoryForm.sortOrder" :min="0" style="width: 100%" />
@@ -1057,6 +1110,13 @@ onMounted(() => {
 
 .muted {
   font-size: 12px;
+  color: #909399;
+}
+
+.form-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
   color: #909399;
 }
 
