@@ -21,6 +21,18 @@ import java.util.Set;
 @Getter
 public class UserItemMatrix {
 
+    /** 全局版本序号，每构建一次矩阵自增 */
+    private static final java.util.concurrent.atomic.AtomicLong VERSION_SEQ =
+            new java.util.concurrent.atomic.AtomicLong();
+
+    /**
+     * 矩阵版本号。
+     *
+     * <p>缓存（用户相似邻居）以版本号为键的一部分：矩阵重建一次版本就变，
+     * 旧缓存自然失效，不需要手动清理每一个调用方。
+     */
+    private final long version = VERSION_SEQ.incrementAndGet();
+
     /** 正向索引：userId → (productId → 加权分) */
     private final Map<Long, Map<Long, Double>> userItems = new HashMap<>();
 

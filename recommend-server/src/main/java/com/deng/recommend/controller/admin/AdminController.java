@@ -6,6 +6,7 @@ import com.deng.recommend.entity.Carousel;
 import com.deng.recommend.entity.Category;
 import com.deng.recommend.entity.Product;
 import com.deng.recommend.service.AdminService;
+import com.deng.recommend.service.BehaviorService;
 import com.deng.recommend.vo.CarouselVO;
 import com.deng.recommend.vo.OrderVO;
 import com.deng.recommend.vo.ProductVO;
@@ -35,6 +36,19 @@ import java.util.Map;
 public class AdminController {
 
     private final AdminService adminService;
+    private final BehaviorService behaviorService;
+
+    /**
+     * 手动刷新推荐模型缓存。
+     *
+     * <p>平时矩阵靠 TTL 自动过期；批量导入行为数据后想让推荐立刻反映新数据时，
+     * 点一下这个接口即可，不用等过期。
+     */
+    @PostMapping("/recommend/refresh")
+    public Result<Void> refreshRecommendModel() {
+        behaviorService.evictMatrixCache();
+        return Result.success();
+    }
 
     @PostMapping("/products")
     public Result<ProductVO> createProduct(@RequestBody Product product) {

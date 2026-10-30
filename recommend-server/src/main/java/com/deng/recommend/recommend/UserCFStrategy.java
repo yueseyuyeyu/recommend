@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
@@ -35,6 +36,18 @@ import java.util.stream.Collectors;
  */
 @Component
 public class UserCFStrategy implements RecommendStrategy {
+
+    /** 邻居缓存上限，超过整体清空，避免用户数增长后内存无界 */
+    private static final int MAX_NEIGHBOR_CACHE = 2000;
+
+    /**
+     * 用户相似邻居缓存：key = 矩阵版本号 + 用户 ID。
+     *
+     * <p>这是本策略最贵的一步——每个用户都要和全部用户算一次余弦相似度。
+     * 同一个用户在同一次矩阵版本下反复请求时，直接复用即可。
+     * 矩阵重建后版本号变化，旧条目再也不会被命中，由容量上限统一回收。
+     */
+    private final Map<String, List<ScoredItem>> neighborCache = new ConcurrentHashMap<>();
 
     private final RecommendProperties properties;
 
@@ -64,23 +77,13 @@ public class UserCFStrategy implements RecommendStrategy {
         int topN = request.getTopN() > 0 ? request.getTopN() : properties.getDefaultTopN();
         Set<Long> excluded = buildExcludeSet(request);
 
-        // 1. 计算目标用户与所有其他用户的相似度
-        List<ScoredItem> neighbors = new ArrayList<>();
-        for (Long otherUserId : matrix.allUserIds()) {
-            if (Objects.equals(otherUserId, userId)) {
-                continue;
-            }
-            double similarity = CosineSimilarity.compute(targetItems, matrix.getUserItems(otherUserId));
-            if (similarity > 0.0) {
-                neighbors.add(new ScoredItem(otherUserId, similarity));
-            }
-        }
+        // 1. 取相似邻居（带缓存，已按相似度降序）
+        List<ScoredItem> neighbors = neighborsOf(matrix, userId, targetItems);
         if (neighbors.isEmpty()) {
             return Collections.emptyList();
         }
 
-        // 2. 取相似度最高的 K 个邻居（ScoredItem 自然序为分数降序）
-        neighbors.sort(null);
+        // 2. 取相似度最高的 K 个邻居
         int actualNeighborCount = Math.min(neighborK, neighbors.size());
 
         // 3. 汇总邻居的候选物品并加权打分
@@ -106,6 +109,38 @@ public class UserCFStrategy implements RecommendStrategy {
                 .sorted()
                 .limit(topN)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 计算或复用某个用户的相似邻居列表。
+     *
+     * <p>结果与 topN、neighborK 无关，只取决于矩阵与本用户，
+     * 所以可以整份缓存、按需截取前 K 个。
+     */
+    private List<ScoredItem> neighborsOf(UserItemMatrix matrix, Long userId, Map<Long, Double> targetItems) {
+        String key = matrix.getVersion() + ":" + userId;
+        List<ScoredItem> cached = neighborCache.get(key);
+        if (cached != null) {
+            return cached;
+        }
+
+        List<ScoredItem> neighbors = new ArrayList<>();
+        for (Long otherUserId : matrix.allUserIds()) {
+            if (Objects.equals(otherUserId, userId)) {
+                continue;
+            }
+            double similarity = CosineSimilarity.compute(targetItems, matrix.getUserItems(otherUserId));
+            if (similarity > 0.0) {
+                neighbors.add(new ScoredItem(otherUserId, similarity));
+            }
+        }
+        neighbors.sort(null);
+
+        if (neighborCache.size() > MAX_NEIGHBOR_CACHE) {
+            neighborCache.clear();
+        }
+        neighborCache.put(key, neighbors);
+        return neighbors;
     }
 
     private Set<Long> buildExcludeSet(RecommendRequest request) {

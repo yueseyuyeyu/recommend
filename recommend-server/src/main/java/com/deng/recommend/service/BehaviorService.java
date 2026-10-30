@@ -25,4 +25,12 @@ public interface BehaviorService {
      * @return 行为矩阵
      */
     UserItemMatrix buildMatrix(LocalDateTime since);
+
+    /**
+     * 清空行为矩阵缓存，下一次请求会重新从数据库构建。
+     *
+     * <p>用于后台「刷新推荐模型」按钮，或批量导入数据后立即生效。
+     * 平时靠 TTL 自然过期即可，不必手动调用。
+     */
+    void evictMatrixCache();
 }
