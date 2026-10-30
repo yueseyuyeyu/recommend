@@ -234,7 +234,10 @@ onBeforeUnmount(() => {
     <!-- ============ 分类菜单 + 轮播图 ============ -->
     <section class="hero">
       <aside class="category-menu">
-        <div class="menu-head">全部分类</div>
+        <div class="menu-promo" @click="router.push('/products')">
+          <span class="promo-fire">🔥</span>
+          <span class="promo-text">热门榜单 / 猜你喜欢</span>
+        </div>
         <ul class="cat-list">
           <li
             v-for="category in categories"
@@ -391,15 +394,29 @@ onBeforeUnmount(() => {
   overflow: visible;
 }
 
-.menu-head {
+.menu-promo {
   flex: 0 0 34px;
   display: flex;
   align-items: center;
-  padding: 0 14px;
-  font-size: 13px;
+  gap: 5px;
+  padding: 0 12px;
+  font-size: 12.5px;
   font-weight: 600;
-  color: #303133;
+  color: #ff5000;
+  cursor: pointer;
   border-bottom: 1px solid #f5f5f5;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.promo-fire {
+  flex: 0 0 auto;
+  font-size: 13px;
+}
+
+.promo-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .cat-list {
@@ -417,16 +434,16 @@ onBeforeUnmount(() => {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   padding: 0 12px;
   min-height: 0;
   cursor: pointer;
   transition: background 0.15s;
 }
 
-/* 淘宝式虚线分隔，第一行之外都画上边线 */
+/* 淘宝式细分隔线：极浅的实线，靠密度制造分隔感 */
 .cat-row + .cat-row {
-  border-top: 1px dotted #ebeef5;
+  border-top: 1px solid #f2f3f5;
 }
 
 .cat-row:hover {
@@ -434,12 +451,12 @@ onBeforeUnmount(() => {
 }
 
 .cat-icon {
-  flex: 0 0 15px;
-  width: 15px;
-  height: 15px;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
   fill: none;
-  stroke: #909399;
-  stroke-width: 1.5;
+  stroke: #5a5a5a;
+  stroke-width: 1.4;
   stroke-linecap: round;
   stroke-linejoin: round;
   transition: stroke 0.15s;
@@ -452,7 +469,7 @@ onBeforeUnmount(() => {
 .cat-text {
   flex: 1;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.2;
   color: #333;
   overflow: hidden;
@@ -466,16 +483,16 @@ onBeforeUnmount(() => {
 }
 
 .cat-name {
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .cat-sub {
-  color: #9b9b9b;
+  color: #333;
   font-weight: 400;
 }
 
 .cat-row:hover .cat-sub {
-  color: #ff8a4d;
+  color: #ff5000;
 }
 
 .cat-arrow {
@@ -485,18 +502,18 @@ onBeforeUnmount(() => {
   line-height: 1;
 }
 
-/* 二级悬浮面板 */
+/* 二级悬浮面板：左侧橙色竖线 + 白底，贴合淘宝的展开面板观感 */
 .cat-flyout {
   position: absolute;
   left: 100%;
   top: -1px;
   z-index: 30;
-  min-width: 230px;
+  min-width: 300px;
   min-height: 100%;
-  padding: 12px 14px 14px;
+  padding: 12px 16px 14px;
   background: #fff;
   border: 1px solid #f0f0f0;
-  border-left: none;
+  border-left: 2px solid #ff5000;
   border-radius: 0 8px 8px 0;
   box-shadow: 6px 8px 20px rgba(0, 0, 0, 0.08);
 }
@@ -508,10 +525,11 @@ onBeforeUnmount(() => {
   margin-bottom: 10px;
 }
 
+/* 子类目横向排布并自动换行，接近淘宝面板里一行排多个词的样子 */
 .flyout-links {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 10px 18px;
 }
 
 .flyout-link {
