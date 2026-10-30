@@ -1,12 +1,15 @@
 package com.deng.recommend.service;
 
 import com.deng.recommend.common.PageResult;
+import com.deng.recommend.entity.Carousel;
 import com.deng.recommend.entity.Category;
 import com.deng.recommend.entity.Product;
+import com.deng.recommend.vo.CarouselVO;
 import com.deng.recommend.vo.OrderVO;
 import com.deng.recommend.vo.ProductVO;
 import com.deng.recommend.vo.UserVO;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -110,4 +113,37 @@ public interface AdminService {
      * @return 统计指标键值对
      */
     Map<String, Object> statistics();
+
+    /**
+     * 查询全部轮播图（后台，含已停用）。
+     *
+     * <p>前台接口 {@code GET /api/carousels} 只返回启用的；后台需要看到全部，
+     * 否则管理员把某张图停用后就再也找不到了。
+     *
+     * @return 轮播图列表，按 sortOrder 升序
+     */
+    List<CarouselVO> listCarousels();
+
+    /**
+     * 新增或更新轮播图。
+     *
+     * @param carousel 轮播图实体，id 为空表示新增
+     * @return 保存后的轮播图视图
+     */
+    CarouselVO saveCarousel(Carousel carousel);
+
+    /**
+     * 删除轮播图（逻辑删除）。
+     *
+     * @param id 轮播图 ID
+     */
+    void deleteCarousel(Long id);
+
+    /**
+     * 启用或停用轮播图。
+     *
+     * @param id     轮播图 ID
+     * @param status 1-启用，0-停用
+     */
+    void updateCarouselStatus(Long id, Integer status);
 }

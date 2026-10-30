@@ -2,9 +2,11 @@ package com.deng.recommend.controller.admin;
 
 import com.deng.recommend.common.PageResult;
 import com.deng.recommend.common.Result;
+import com.deng.recommend.entity.Carousel;
 import com.deng.recommend.entity.Category;
 import com.deng.recommend.entity.Product;
 import com.deng.recommend.service.AdminService;
+import com.deng.recommend.vo.CarouselVO;
 import com.deng.recommend.vo.OrderVO;
 import com.deng.recommend.vo.ProductVO;
 import com.deng.recommend.vo.UserVO;
@@ -20,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -37,9 +40,7 @@ public class AdminController {
     public Result<ProductVO> createProduct(@RequestBody Product product) {
         product.setId(null);
         return Result.success(adminService.saveProduct(product));
-    }
-
-    @PutMapping("/products/{id}")
+    }    @PutMapping("/products/{id}")
     public Result<ProductVO> updateProduct(@PathVariable Long id, @RequestBody Product product) {
         product.setId(id);
         return Result.success(adminService.saveProduct(product));
@@ -105,5 +106,39 @@ public class AdminController {
     @GetMapping("/statistics")
     public Result<Map<String, Object>> statistics() {
         return Result.success(adminService.statistics());
+    }
+
+    /* ==================== 轮播图管理 ==================== */
+
+    /**
+     * 轮播图列表（含已停用），按 sortOrder 升序。
+     */
+    @GetMapping("/carousels")
+    public Result<List<CarouselVO>> listCarousels() {
+        return Result.success(adminService.listCarousels());
+    }
+
+    @PostMapping("/carousels")
+    public Result<CarouselVO> createCarousel(@RequestBody Carousel carousel) {
+        carousel.setId(null);
+        return Result.success(adminService.saveCarousel(carousel));
+    }
+
+    @PutMapping("/carousels/{id}")
+    public Result<CarouselVO> updateCarousel(@PathVariable Long id, @RequestBody Carousel carousel) {
+        carousel.setId(id);
+        return Result.success(adminService.saveCarousel(carousel));
+    }
+
+    @DeleteMapping("/carousels/{id}")
+    public Result<Void> deleteCarousel(@PathVariable Long id) {
+        adminService.deleteCarousel(id);
+        return Result.success();
+    }
+
+    @PutMapping("/carousels/{id}/status")
+    public Result<Void> updateCarouselStatus(@PathVariable Long id, @RequestParam Integer status) {
+        adminService.updateCarouselStatus(id, status);
+        return Result.success();
     }
 }

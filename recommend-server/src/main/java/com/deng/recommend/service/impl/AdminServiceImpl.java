@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.deng.recommend.common.BusinessException;
 import com.deng.recommend.common.PageResult;
 import com.deng.recommend.common.ResultCode;
+import com.deng.recommend.entity.Carousel;
 import com.deng.recommend.entity.Category;
 import com.deng.recommend.entity.Order;
 import com.deng.recommend.entity.OrderItem;
@@ -13,12 +14,14 @@ import com.deng.recommend.entity.Product;
 import com.deng.recommend.entity.User;
 import com.deng.recommend.entity.enums.OrderStatus;
 import com.deng.recommend.mapper.BehaviorMapper;
+import com.deng.recommend.mapper.CarouselMapper;
 import com.deng.recommend.mapper.CategoryMapper;
 import com.deng.recommend.mapper.OrderItemMapper;
 import com.deng.recommend.mapper.OrderMapper;
 import com.deng.recommend.mapper.ProductMapper;
 import com.deng.recommend.mapper.UserMapper;
 import com.deng.recommend.service.AdminService;
+import com.deng.recommend.vo.CarouselVO;
 import com.deng.recommend.vo.OrderItemVO;
 import com.deng.recommend.vo.OrderVO;
 import com.deng.recommend.vo.ProductVO;
@@ -51,6 +54,7 @@ public class AdminServiceImpl implements AdminService {
 
     private final ProductMapper productMapper;
     private final CategoryMapper categoryMapper;
+    private final CarouselMapper carouselMapper;
     private final UserMapper userMapper;
     private final OrderMapper orderMapper;
     private final OrderItemMapper orderItemMapper;
@@ -292,5 +296,70 @@ public class AdminServiceImpl implements AdminService {
                 .createTime(order.getCreateTime())
                 .items(items)
                 .build();
+    }
+
+    /* ==================== 轮播图管理 ==================== */
+
+    @Override
+    public List<CarouselVO> listCarousels() {
+        List<Carousel> list = carouselMapper.selectList(new LambdaQueryWrapper<Carousel>()
+                .orderByAsc(Carousel::getSortOrder)
+                .orderByAsc(Carousel::getId));
+        List<CarouselVO> vos = new ArrayList<>(list.size());
+        for (Carousel carousel : list) {
+            vos.add(CarouselVO.from(carousel));
+        }
+        return vos;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public CarouselVO saveCarousel(Carousel carousel) {
+        if (!StringUtils.hasText(carousel.getTitle())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "轮播图标题不能为空");
+        }
+        if (carousel.getSortOrder() == null) {
+            carousel.setSortOrder(0);
+        }
+        if (carousel.getStatus() == null) {
+            carousel.setStatus(1);
+        }
+        // 没给渐变色时兜底，避免前端背景变透明
+        if (!StringUtils.hasText(carousel.getBgColor())) {
+            carousel.setBgColor("linear-gradient(135deg,#ff6a00,#ee0979)");
+        }
+
+        if (carousel.getId() == null) {
+            carouselMapper.insert(carousel);
+        } else {
+            if (carouselMapper.selectById(carousel.getId()) == null) {
+                throw new BusinessException(ResultCode.NOT_FOUND, "轮播图不存在");
+            }
+            carouselMapper.updateById(carousel);
+        }
+        return CarouselVO.from(carouselMapper.selectById(carousel.getId()));
+    }
+
+    @Override
+    public void deleteCarousel(Long id) {
+        if (carouselMapper.selectById(id) == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "轮播图不存在");
+        }
+        carouselMapper.deleteById(id);
+    }
+
+    @Override
+    public void updateCarouselStatus(Long id, Integer status) {
+        if (status == null || (status != 0 && status != 1)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "状态只能为 0 或 1");
+        }
+        Carousel exists = carouselMapper.selectById(id);
+        if (exists == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND, "轮播图不存在");
+        }
+        Carousel update = new Carousel();
+        update.setId(id);
+        update.setStatus(status);
+        carouselMapper.updateById(update);
     }
 }
