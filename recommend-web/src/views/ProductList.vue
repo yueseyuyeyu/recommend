@@ -17,7 +17,9 @@ const products = ref([])
 const total = ref(0)
 const loading = ref(false)
 const pageNum = ref(1)
-const pageSize = ref(12)
+// 商品栅格宽屏为 5 列，每页取 5 的倍数（3 行）才不会在末行留空格；
+// 原先的 12 是按早期 4 列布局定的，栅格改 5 列后没同步
+const pageSize = ref(15)
 
 const query = reactive({
   keyword: '',
