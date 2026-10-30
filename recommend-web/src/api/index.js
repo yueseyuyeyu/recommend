@@ -22,11 +22,13 @@ export const evaluateRecommend = (topN = 10) =>
   http.get('/recommend/evaluate', { params: { topN } })
 
 /**
- * 分页推荐流，供首页无限滚动使用。
- * 游客也能调用：服务端会自动降级为「热门 + 销量」序列。
+ * 首页推荐流，游标分页，供无限滚动使用。
+ *
+ * 首次调用 cursor 传 null；之后把上一页返回的 nextCursor 原样回传。
+ * 服务端只算一次排行池并缓存，翻页仅做切片，耗时与翻多深无关。
  */
-export const getRecommendFeed = (pageNum = 1, pageSize = 10) =>
-  http.get('/recommend/feed', { params: { pageNum, pageSize } })
+export const getRecommendFeed = (cursor = null, pageSize = 10) =>
+  http.get('/recommend/feed', { params: { cursor: cursor || undefined, pageSize } })
 
 /* ===== 轮播图 ===== */
 export const getCarousels = () => http.get('/carousels')
@@ -77,3 +79,11 @@ export const updateUserStatus = (id, status) =>
 export const getAdminOrders = (params) => http.get('/admin/orders', { params })
 export const updateOrderStatus = (orderNo, status) =>
   http.put(`/admin/orders/${orderNo}/status`, null, { params: { status } })
+
+/* ===== 后台：轮播图管理 ===== */
+export const getAdminCarousels = () => http.get('/admin/carousels')
+export const createCarousel = (data) => http.post('/admin/carousels', data)
+export const updateCarousel = (id, data) => http.put(`/admin/carousels/${id}`, data)
+export const deleteCarousel = (id) => http.delete(`/admin/carousels/${id}`)
+export const updateCarouselStatus = (id, status) =>
+  http.put(`/admin/carousels/${id}/status`, null, { params: { status } })

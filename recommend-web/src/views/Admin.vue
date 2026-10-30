@@ -2,16 +2,21 @@
 import { onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  createCarousel,
   createProduct,
+  deleteCarousel,
   deleteCategory,
   deleteProduct,
   evaluateRecommend,
+  getAdminCarousels,
   getAdminOrders,
   getAdminProducts,
   getAdminUsers,
   getCategories,
   getStatistics,
   saveCategory,
+  updateCarousel,
+  updateCarouselStatus,
   updateOrderStatus,
   updateProduct,
   updateProductStatus,
@@ -414,6 +419,128 @@ function formatTime(time) {
   return (time || '').replace('T', ' ')
 }
 
+/* ================= 轮播图管理 ================= */
+const carousels = ref([])
+const carouselLoading = ref(false)
+const carouselSaving = ref(false)
+const carouselDialog = ref(false)
+
+const carouselForm = reactive({
+  id: null,
+  title: '',
+  subtitle: '',
+  imageUrl: '',
+  bgColor: 'linear-gradient(135deg,#ff6a00,#ee0979)',
+  linkUrl: '/products',
+  sortOrder: 0,
+  status: 1
+})
+
+/** 渐变预设，避免管理员手写 CSS 出错 */
+const GRADIENT_PRESETS = [
+  { label: '橙红', value: 'linear-gradient(135deg,#ff6a00,#ee0979)' },
+  { label: '青绿', value: 'linear-gradient(135deg,#1d976c,#93f9b9)' },
+  { label: '天蓝', value: 'linear-gradient(135deg,#2193b0,#6dd5ed)' },
+  { label: '紫罗兰', value: 'linear-gradient(135deg,#8e2de2,#4a00e0)' },
+  { label: '深灰', value: 'linear-gradient(135deg,#3a3d40,#181818)' }
+]
+
+async function loadCarousels() {
+  carouselLoading.value = true
+  try {
+    carousels.value = (await getAdminCarousels()) || []
+  } catch {
+    carousels.value = []
+  } finally {
+    carouselLoading.value = false
+  }
+}
+
+function resetCarouselForm() {
+  carouselForm.id = null
+  carouselForm.title = ''
+  carouselForm.subtitle = ''
+  carouselForm.imageUrl = ''
+  carouselForm.bgColor = GRADIENT_PRESETS[0].value
+  carouselForm.linkUrl = '/products'
+  carouselForm.sortOrder = 0
+  carouselForm.status = 1
+}
+
+function openCarouselDialog(row) {
+  resetCarouselForm()
+  if (row) {
+    Object.assign(carouselForm, {
+      id: row.id,
+      title: row.title,
+      subtitle: row.subtitle || '',
+      imageUrl: row.imageUrl || '',
+      bgColor: row.bgColor || GRADIENT_PRESETS[0].value,
+      linkUrl: row.linkUrl || '',
+      sortOrder: row.sortOrder ?? 0,
+      status: row.status ?? 1
+    })
+  }
+  carouselDialog.value = true
+}
+
+async function submitCarousel() {
+  if (!carouselForm.title.trim()) {
+    ElMessage.warning('请填写标题')
+    return
+  }
+  carouselSaving.value = true
+  try {
+    const payload = {
+      title: carouselForm.title.trim(),
+      subtitle: carouselForm.subtitle.trim() || null,
+      imageUrl: carouselForm.imageUrl.trim() || null,
+      bgColor: carouselForm.bgColor,
+      linkUrl: carouselForm.linkUrl.trim() || null,
+      sortOrder: carouselForm.sortOrder ?? 0,
+      status: carouselForm.status
+    }
+    if (carouselForm.id) {
+      await updateCarousel(carouselForm.id, payload)
+      ElMessage.success('已更新')
+    } else {
+      await createCarousel(payload)
+      ElMessage.success('已新增')
+    }
+    carouselDialog.value = false
+    loadCarousels()
+  } catch {
+    // 错误提示由拦截器统一处理
+  } finally {
+    carouselSaving.value = false
+  }
+}
+
+async function handleDeleteCarousel(row) {
+  try {
+    await ElMessageBox.confirm(`确定删除轮播图「${row.title}」吗？`, '提示', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await deleteCarousel(row.id)
+    ElMessage.success('已删除')
+    loadCarousels()
+  } catch {
+    // 拦截器已提示
+  }
+}
+
+async function handleCarouselStatusChange(row) {
+  try {
+    await updateCarouselStatus(row.id, row.status)
+    ElMessage.success(row.status === 1 ? '已启用' : '已停用')
+  } catch {
+    // 失败回滚显示
+    row.status = row.status === 1 ? 0 : 1
+  }
+}
+
 /* ================= 生命周期 ================= */
 watch(activeTab, (tab) => {
   if (tab === 'products') {
@@ -425,6 +552,8 @@ watch(activeTab, (tab) => {
     loadUsers()
   } else if (tab === 'orders') {
     loadAdminOrders()
+  } else if (tab === 'carousels') {
+    loadCarousels()
   }
 })
 
@@ -700,7 +829,97 @@ onMounted(() => {
           </div>
         </el-card>
       </el-tab-pane>
+      <el-tab-pane label="轮播图管理" name="carousels">
+        <el-card shadow="never">
+          <div class="toolbar">
+            <el-button type="primary" @click="openCarouselDialog()">新增轮播图</el-button>
+            <span class="muted">
+              共 {{ carousels.length }} 条 · 排序值越小越靠前 · 未填背景图时使用渐变色
+            </span>
+          </div>
+
+          <el-table v-loading="carouselLoading" :data="carousels" border>
+            <el-table-column label="预览" width="190">
+              <template #default="{ row }">
+                <div
+                  class="carousel-preview"
+                  :style="row.imageUrl
+                    ? { backgroundImage: `url(${row.imageUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                    : { background: row.bgColor }"
+                >
+                  <span>{{ row.title }}</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="title" label="标题" min-width="120" />
+            <el-table-column prop="subtitle" label="副标题" min-width="200" show-overflow-tooltip />
+            <el-table-column prop="linkUrl" label="跳转路径" min-width="160" show-overflow-tooltip />
+            <el-table-column prop="sortOrder" label="排序" width="80" align="center" />
+            <el-table-column label="状态" width="90" align="center">
+              <template #default="{ row }">
+                <el-switch
+                  v-model="row.status"
+                  :active-value="1"
+                  :inactive-value="0"
+                  @change="handleCarouselStatusChange(row)"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="140" align="center">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openCarouselDialog(row)">编辑</el-button>
+                <el-button link type="danger" @click="handleDeleteCarousel(row)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+      </el-tab-pane>
     </el-tabs>
+
+    <!-- ============ 轮播图编辑弹窗 ============ -->
+    <el-dialog
+      v-model="carouselDialog"
+      :title="carouselForm.id ? '编辑轮播图' : '新增轮播图'"
+      width="580px"
+    >
+      <el-form label-width="96px" @submit.prevent>
+        <el-form-item label="标题" required>
+          <el-input v-model="carouselForm.title" maxlength="100" show-word-limit placeholder="如：个性化推荐引擎" />
+        </el-form-item>
+        <el-form-item label="副标题">
+          <el-input v-model="carouselForm.subtitle" maxlength="255" placeholder="一句话说明，可留空" />
+        </el-form-item>
+        <el-form-item label="背景渐变">
+          <div class="gradient-picker">
+            <div
+              v-for="preset in GRADIENT_PRESETS"
+              :key="preset.value"
+              class="gradient-swatch"
+              :class="{ 'is-active': carouselForm.bgColor === preset.value }"
+              :style="{ background: preset.value }"
+              :title="preset.label"
+              @click="carouselForm.bgColor = preset.value"
+            ></div>
+          </div>
+        </el-form-item>
+        <el-form-item label="背景图URL">
+          <el-input v-model="carouselForm.imageUrl" placeholder="填写后覆盖渐变，可留空" />
+        </el-form-item>
+        <el-form-item label="跳转路径">
+          <el-input v-model="carouselForm.linkUrl" placeholder="如 /products 或 /products?categoryId=2" />
+        </el-form-item>
+        <el-form-item label="排序">
+          <el-input-number v-model="carouselForm.sortOrder" :min="0" :max="999" />
+        </el-form-item>
+        <el-form-item label="启用">
+          <el-switch v-model="carouselForm.status" :active-value="1" :inactive-value="0" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="carouselDialog = false">取消</el-button>
+        <el-button type="primary" :loading="carouselSaving" @click="submitCarousel">保存</el-button>
+      </template>
+    </el-dialog>
 
     <!-- ============ 商品编辑弹窗 ============ -->
     <el-dialog v-model="productDialog" :title="productForm.id ? '编辑商品' : '新增商品'" width="640px">
@@ -826,5 +1045,56 @@ onMounted(() => {
   display: flex;
   justify-content: center;
   margin-top: 16px;
+}
+
+/* ================= 轮播图管理 ================= */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.muted {
+  font-size: 12px;
+  color: #909399;
+}
+
+.carousel-preview {
+  height: 58px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  padding: 0 8px;
+  text-align: center;
+}
+
+.gradient-picker {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.gradient-swatch {
+  width: 54px;
+  height: 30px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.gradient-swatch:hover {
+  transform: translateY(-1px);
+}
+
+.gradient-swatch.is-active {
+  border-color: #303133;
 }
 </style>
