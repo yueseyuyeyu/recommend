@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.deng.recommend.common.BusinessException;
 import com.deng.recommend.common.PageResult;
 import com.deng.recommend.common.ResultCode;
+import com.deng.recommend.config.OrderProperties;
 import com.deng.recommend.config.SecurityUtils;
 import com.deng.recommend.entity.Carousel;
 import com.deng.recommend.entity.Category;
@@ -13,6 +14,7 @@ import com.deng.recommend.entity.Order;
 import com.deng.recommend.entity.OrderItem;
 import com.deng.recommend.entity.Product;
 import com.deng.recommend.entity.User;
+import com.deng.recommend.entity.enums.Carrier;
 import com.deng.recommend.entity.enums.NotificationType;
 import com.deng.recommend.entity.enums.OperatorType;
 import com.deng.recommend.entity.enums.OrderStatus;
@@ -71,6 +73,7 @@ public class AdminServiceImpl implements AdminService {
     private final OrderService orderService;
     private final OrderStatusLogService orderStatusLogService;
     private final NotificationService notificationService;
+    private final OrderProperties orderProperties;
 
     /** 类目最大层级：一级 → 二级 → 三级 */
     private static final int MAX_CATEGORY_LEVEL = 3;
@@ -260,7 +263,14 @@ public class AdminServiceImpl implements AdminService {
 
         // 发货必须带物流单号，走专门的 ship 接口
         if (target == OrderStatus.SHIPPED) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "发货请通过发货操作填写物流单号");
+            throw new BusinessException(ResultCode.PARAM_ERROR, "发货请通过发货操作选择配送方");
+        }
+
+        // 确认收货有 7 天时效门槛，通用改状态接口绕不过去
+        if (target == OrderStatus.FINISHED) {
+            int days = orderProperties.getAutoReceiptDays();
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "确认收货请通过确认收货操作" + (days > 0 ? "，需发货满 " + days + " 天" : ""));
         }
 
         Order update = new Order();
@@ -276,10 +286,8 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void ship(String orderNo, String trackingNo) {
-        if (!StringUtils.hasText(trackingNo)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "请填写物流单号");
-        }
+    public String ship(String orderNo, String carrierCode, String trackingNo) {
+        Carrier carrier = Carrier.of(carrierCode);
 
         Order order = orderMapper.selectOne(new LambdaQueryWrapper<Order>()
                 .eq(Order::getOrderNo, orderNo));
@@ -293,22 +301,70 @@ public class AdminServiceImpl implements AdminService {
                     "订单当前为「" + current.getName() + "」，不能发货");
         }
 
+        // 单号留空就按配送方规则自动生成，正常流程只需选快递公司
+        String finalTrackingNo = StringUtils.hasText(trackingNo)
+                ? trackingNo.trim()
+                : carrier.generateTrackingNo();
+
         Order update = new Order();
         update.setId(order.getId());
         update.setStatus(OrderStatus.SHIPPED.getCode());
-        update.setTrackingNo(trackingNo.trim());
+        update.setCarrier(carrier.getCode());
+        update.setTrackingNo(finalTrackingNo);
+        update.setShipTime(LocalDateTime.now());
         orderMapper.updateById(update);
 
+        String remark = "配送方：" + carrier.getDisplayName() + "，单号：" + finalTrackingNo;
         orderStatusLogService.record(orderNo, OrderStatus.PAID.getCode(), OrderStatus.SHIPPED.getCode(),
-                OperatorType.ADMIN, SecurityUtils.currentUserId(), currentOperatorName(),
-                "物流单号：" + trackingNo.trim());
+                OperatorType.ADMIN, SecurityUtils.currentUserId(), currentOperatorName(), remark);
 
         notificationService.push(order.getUserId(), NotificationType.ORDER_SHIPPED,
                 "订单已发货",
-                "您的订单 " + orderNo + " 已发货，物流单号 " + trackingNo.trim() + "，请注意查收。",
+                "您的订单 " + orderNo + " 已由" + carrier.getDisplayName() + "发出，物流单号 "
+                        + finalTrackingNo + "，请注意查收。",
                 "ORDER", orderNo);
 
-        log.info("订单发货, orderNo={}, trackingNo={}", orderNo, trackingNo.trim());
+        log.info("订单发货, orderNo={}, carrier={}, trackingNo={}",
+                orderNo, carrier.getCode(), finalTrackingNo);
+        return finalTrackingNo;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void confirmReceipt(String orderNo) {
+        Order order = orderMapper.selectOne(new LambdaQueryWrapper<Order>()
+                .eq(Order::getOrderNo, orderNo));
+        if (order == null) {
+            throw new BusinessException(ResultCode.ORDER_NOT_FOUND);
+        }
+
+        OrderStatus current = OrderStatus.of(order.getStatus());
+        if (!current.canTransitionTo(OrderStatus.FINISHED)) {
+            throw new BusinessException(ResultCode.ORDER_STATUS_ILLEGAL,
+                    "订单当前为「" + current.getName() + "」，不能确认收货");
+        }
+
+        int days = orderProperties.getAutoReceiptDays();
+        if (days > 0) {
+            LocalDateTime shipTime = order.getShipTime();
+            if (shipTime == null) {
+                throw new BusinessException(ResultCode.ORDER_STATUS_ILLEGAL, "该订单缺少发货时间，无法确认收货");
+            }
+            if (shipTime.plusDays(days).isAfter(LocalDateTime.now())) {
+                throw new BusinessException(ResultCode.ORDER_STATUS_ILLEGAL,
+                        "发货满 " + days + " 天后才能确认收货，当前尚未到期");
+            }
+        }
+
+        Order update = new Order();
+        update.setId(order.getId());
+        update.setStatus(OrderStatus.FINISHED.getCode());
+        orderMapper.updateById(update);
+
+        orderStatusLogService.record(orderNo, OrderStatus.SHIPPED.getCode(), OrderStatus.FINISHED.getCode(),
+                OperatorType.ADMIN, SecurityUtils.currentUserId(), currentOperatorName(), "管理员确认收货");
+
+        log.info("管理员确认收货, orderNo={}", orderNo);
     }
 
     @Override
@@ -372,6 +428,9 @@ public class AdminServiceImpl implements AdminService {
                 .payTypeName(PayType.nameOf(order.getPayType()))
                 .paidTime(order.getPaidTime())
                 .trackingNo(order.getTrackingNo())
+                .carrier(order.getCarrier())
+                .carrierName(Carrier.nameOf(order.getCarrier()))
+                .shipTime(order.getShipTime())
                 .receiverName(order.getReceiverName())
                 .receiverPhone(order.getReceiverPhone())
                 .receiverAddr(order.getReceiverAddr())

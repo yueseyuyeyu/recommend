@@ -14,6 +14,7 @@ import com.deng.recommend.entity.Order;
 import com.deng.recommend.entity.OrderItem;
 import com.deng.recommend.entity.Product;
 import com.deng.recommend.entity.enums.BehaviorType;
+import com.deng.recommend.entity.enums.Carrier;
 import com.deng.recommend.entity.enums.NotificationType;
 import com.deng.recommend.entity.enums.OperatorType;
 import com.deng.recommend.entity.enums.OrderStatus;
@@ -204,6 +205,43 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int confirmExpiredReceipts(int days) {
+        if (days <= 0) {
+            return 0;
+        }
+
+        LocalDateTime deadline = LocalDateTime.now().minusDays(days);
+        List<Order> expired = orderMapper.selectList(new LambdaQueryWrapper<Order>()
+                .eq(Order::getStatus, OrderStatus.SHIPPED.getCode())
+                .isNotNull(Order::getShipTime)
+                .lt(Order::getShipTime, deadline));
+
+        if (expired.isEmpty()) {
+            return 0;
+        }
+
+        int confirmed = 0;
+        for (Order order : expired) {
+            try {
+                Order update = new Order();
+                update.setId(order.getId());
+                update.setStatus(OrderStatus.FINISHED.getCode());
+                orderMapper.updateById(update);
+
+                orderStatusLogService.record(order.getOrderNo(),
+                        OrderStatus.SHIPPED.getCode(), OrderStatus.FINISHED.getCode(),
+                        OperatorType.SYSTEM, null, "系统", "发货满 " + days + " 天自动确认收货");
+                confirmed++;
+            } catch (Exception e) {
+                log.warn("自动确认收货失败, orderNo={}", order.getOrderNo(), e);
+            }
+        }
+        log.info("自动确认收货完成, 阈值={}天, 本轮确认={}笔", days, confirmed);
+        return confirmed;
+    }
+
+    @Override
     public List<OrderStatusLogVO> logs(Long userId, String orderNo) {
         // 先校验归属，避免换个订单号就能看别人的流转记录
         getOwnedOrder(userId, orderNo);
@@ -362,6 +400,9 @@ public class OrderServiceImpl implements OrderService {
                 .payTypeName(PayType.nameOf(order.getPayType()))
                 .paidTime(order.getPaidTime())
                 .trackingNo(order.getTrackingNo())
+                .carrier(order.getCarrier())
+                .carrierName(Carrier.nameOf(order.getCarrier()))
+                .shipTime(order.getShipTime())
                 .receiverName(order.getReceiverName())
                 .receiverPhone(order.getReceiverPhone())
                 .receiverAddr(order.getReceiverAddr())

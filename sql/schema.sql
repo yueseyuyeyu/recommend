@@ -142,6 +142,8 @@ CREATE TABLE `orders` (
   `receiver_addr`  VARCHAR(255)  DEFAULT NULL            COMMENT '收货地址',
   `paid_time`      DATETIME      DEFAULT NULL            COMMENT '支付时间',
   `tracking_no`    VARCHAR(64)   DEFAULT NULL            COMMENT '物流单号，发货时填写',
+  `carrier`        VARCHAR(32)   DEFAULT NULL            COMMENT '配送方：SF-顺丰，EMS-邮政，ZTO-中通，YTO-圆通，YUNDA-韵达，JD-京东',
+  `ship_time`      DATETIME      DEFAULT NULL            COMMENT '发货时间，自动确认收货的计时起点',
   `is_deleted`     TINYINT       NOT NULL DEFAULT 0      COMMENT '逻辑删除',
   `create_time`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',

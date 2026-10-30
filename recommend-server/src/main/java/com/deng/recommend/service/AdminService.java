@@ -108,15 +108,26 @@ public interface AdminService {
     void updateOrderStatus(String orderNo, Integer status);
 
     /**
-     * 发货：已支付 → 已发货，并记录物流单号。
+     * 发货：已支付 → 已发货，记录配送方与物流单号。
      *
-     * <p>单独开一个接口而不是复用 {@link #updateOrderStatus}，
-     * 是为了强制发货必须带物流单号——通用改状态接口拿不到这个参数。
+     * <p>单号留空时按配送方规则自动生成，所以正常流程只需要选配送方。
      *
      * @param orderNo    订单号
-     * @param trackingNo 物流单号，不允许为空
+     * @param carrier    配送方编码，取值见 {@link com.deng.recommend.entity.enums.Carrier}
+     * @param trackingNo 物流单号，为空则自动生成
+     * @return 最终使用的物流单号
      */
-    void ship(String orderNo, String trackingNo);
+    String ship(String orderNo, String carrier, String trackingNo);
+
+    /**
+     * 管理员确认收货。
+     *
+     * <p>只允许在发货满 {@code order.auto-receipt-days} 天后操作，
+     * 避免管理员提前替买家确认收货、把交易强行结束。
+     *
+     * @param orderNo 订单号
+     */
+    void confirmReceipt(String orderNo);
 
     /**
      * 汇总后台首页统计指标。

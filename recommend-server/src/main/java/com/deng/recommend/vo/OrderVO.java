@@ -40,6 +40,15 @@ public class OrderVO {
     /** 物流单号，未发货为 null */
     private String trackingNo;
 
+    /** 配送方编码 */
+    private String carrier;
+
+    /** 配送方名称，如「顺丰速运」 */
+    private String carrierName;
+
+    /** 发货时间 */
+    private LocalDateTime shipTime;
+
     private String receiverName;
 
     private String receiverPhone;

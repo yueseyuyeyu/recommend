@@ -49,6 +49,12 @@ public class Order {
     /** 物流单号，发货时填写 */
     private String trackingNo;
 
+    /** 配送方编码，取值见 {@link com.deng.recommend.entity.enums.Carrier} */
+    private String carrier;
+
+    /** 发货时间，「发货满 N 天自动确认收货」的计时起点 */
+    private LocalDateTime shipTime;
+
     @TableLogic
     private Integer isDeleted;
 

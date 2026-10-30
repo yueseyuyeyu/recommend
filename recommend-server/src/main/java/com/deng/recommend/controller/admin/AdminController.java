@@ -104,15 +104,24 @@ public class AdminController {
     }
 
     /**
-     * 发货：已支付 → 已发货，必须填物流单号。
+     * 发货：已支付 → 已发货。
      *
-     * <p>{@code trackingNo} 设为非必填，让校验落在服务层，
-     * 这样缺单号时返回的是「请填写物流单号」而不是框架的缺参错误。
+     * <p>必须选配送方；物流单号留空时按配送方规则自动生成，
+     * 返回值就是最终使用的单号，前端可以直接展示给管理员核对。
      */
     @PostMapping("/orders/{orderNo}/ship")
-    public Result<Void> ship(@PathVariable String orderNo,
-                             @RequestParam(required = false) String trackingNo) {
-        adminService.ship(orderNo, trackingNo);
+    public Result<String> ship(@PathVariable String orderNo,
+                               @RequestParam(required = false) String carrier,
+                               @RequestParam(required = false) String trackingNo) {
+        return Result.success(adminService.ship(orderNo, carrier, trackingNo));
+    }
+
+    /**
+     * 管理员确认收货：仅当发货满 N 天（默认 7 天）后才允许。
+     */
+    @PostMapping("/orders/{orderNo}/confirm-receipt")
+    public Result<Void> confirmReceipt(@PathVariable String orderNo) {
+        adminService.confirmReceipt(orderNo);
         return Result.success();
     }
 
