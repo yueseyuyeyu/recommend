@@ -22,6 +22,7 @@ import com.deng.recommend.mapper.OrderMapper;
 import com.deng.recommend.mapper.ProductMapper;
 import com.deng.recommend.mapper.UserMapper;
 import com.deng.recommend.service.AdminService;
+import com.deng.recommend.service.OrderService;
 import com.deng.recommend.vo.CarouselVO;
 import com.deng.recommend.vo.OrderItemVO;
 import com.deng.recommend.vo.OrderVO;
@@ -62,6 +63,7 @@ public class AdminServiceImpl implements AdminService {
     private final OrderMapper orderMapper;
     private final OrderItemMapper orderItemMapper;
     private final BehaviorMapper behaviorMapper;
+    private final OrderService orderService;
 
     /** 类目最大层级：一级 → 二级 → 三级 */
     private static final int MAX_CATEGORY_LEVEL = 3;
@@ -229,17 +231,32 @@ public class AdminServiceImpl implements AdminService {
         if (order == null) {
             throw new BusinessException(ResultCode.ORDER_NOT_FOUND);
         }
-        if (OrderStatus.CANCELLED == OrderStatus.of(order.getStatus())) {
-            throw new BusinessException(ResultCode.ORDER_STATUS_ILLEGAL, "已取消的订单不可再变更");
+
+        OrderStatus current = OrderStatus.of(order.getStatus());
+        OrderStatus target = OrderStatus.of(status);
+
+        // 重复提交同一个状态，直接当成功处理
+        if (current == target) {
+            return;
         }
-        LambdaUpdateWrapper<Order> wrapper = new LambdaUpdateWrapper<Order>()
-                .eq(Order::getOrderNo, orderNo)
-                .set(Order::getStatus, status);
-        if (OrderStatus.PAID == OrderStatus.of(status) && order.getPaidTime() == null) {
-            wrapper.set(Order::getPaidTime, LocalDateTime.now());
+
+        if (!current.canTransitionTo(target)) {
+            throw new BusinessException(ResultCode.ORDER_STATUS_ILLEGAL,
+                    "订单当前为「" + current.getName() + "」，不能变更为「" + target.getName() + "」");
         }
-        orderMapper.update(null, wrapper);
-        log.info("订单状态变更, orderNo={}, status={}", orderNo, status);
+
+        // 取消复用用户侧逻辑，库存回滚只写一份，避免两边行为不一致
+        if (target == OrderStatus.CANCELLED) {
+            orderService.cancel(order.getUserId(), orderNo);
+            log.info("后台取消订单, orderNo={}", orderNo);
+            return;
+        }
+
+        Order update = new Order();
+        update.setId(order.getId());
+        update.setStatus(target.getCode());
+        orderMapper.updateById(update);
+        log.info("订单状态变更, orderNo={}, {} -> {}", orderNo, current.getName(), target.getName());
     }
 
     @Override
