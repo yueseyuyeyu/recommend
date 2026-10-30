@@ -1,6 +1,8 @@
 package com.deng.recommend.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.deng.recommend.common.PageResult;
 import com.deng.recommend.config.RecommendProperties;
 import com.deng.recommend.entity.Behavior;
 import com.deng.recommend.entity.Product;
@@ -21,9 +23,11 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 推荐服务实现：负责「算法输出 → 商品视图」的编排。
@@ -82,6 +86,44 @@ public class RecommendServiceImpl implements RecommendService {
         List<ScoredItem> scoredItems = recommendEngine.recommendHybrid(
                 matrix, userId, itemId, size, buildExcludeIds(userId));
         return toRecommendVOs(scoredItems);
+    }
+
+    @Override
+    public PageResult<RecommendVO> recommendFeed(Long userId, int pageNum, int pageSize) {
+        int safePage = Math.max(1, pageNum);
+        int safeSize = Math.min(Math.max(1, pageSize), 50);
+        long total = countOnSaleProducts();
+        long offset = (long) (safePage - 1) * safeSize;
+
+        // 已翻过最后一页，直接返回空页
+        if (offset >= total) {
+            return new PageResult<>(safePage, safeSize, total, new ArrayList<>());
+        }
+
+        UserItemMatrix matrix = behaviorService.buildMatrix(null);
+        List<Long> exclude = buildExcludeIds(userId);
+
+        // 取「前 pageNum 页」的候选前缀，再切出当前页
+        int needed = safePage * safeSize;
+        List<ScoredItem> scoredItems = new ArrayList<>(
+                recommendEngine.recommendForUser(matrix, userId, needed, exclude));
+
+        // 协同过滤候选池有限，翻深了会不够，按销量从商品表补足
+        if (scoredItems.size() < needed) {
+            Set<Long> alreadyHave = new HashSet<>(exclude);
+            for (ScoredItem item : scoredItems) {
+                alreadyHave.add(item.getItemId());
+            }
+            appendSalesFallback(scoredItems, alreadyHave, needed - scoredItems.size());
+        }
+
+        int from = (int) offset;
+        if (from >= scoredItems.size()) {
+            return new PageResult<>(safePage, safeSize, total, new ArrayList<>());
+        }
+        int to = Math.min(scoredItems.size(), from + safeSize);
+        List<ScoredItem> slice = new ArrayList<>(scoredItems.subList(from, to));
+        return new PageResult<>(safePage, safeSize, total, toRecommendVOs(slice));
     }
 
     @Override
@@ -178,5 +220,38 @@ public class RecommendServiceImpl implements RecommendService {
 
     private java.time.LocalDateTime hotWindowStart() {
         return java.time.LocalDateTime.now().minusDays(properties.getHotDays());
+    }
+
+    /**
+     * 在售商品总数，作为推荐流分页的 total。
+     */
+    private long countOnSaleProducts() {
+        Long count = productMapper.selectCount(new LambdaQueryWrapper<Product>()
+                .eq(Product::getStatus, 1));
+        return count == null ? 0L : count;
+    }
+
+    /**
+     * 用销量排序的商品补足候选池。
+     *
+     * <p>推荐分统一给 0，保证它们排在算法产出的真推荐之后——
+     * 补位商品只是「还有内容可看」，不应该抢占真正的个性化结果。
+     */
+    private void appendSalesFallback(List<ScoredItem> target, Set<Long> excludeIds, int limit) {
+        if (limit <= 0) {
+            return;
+        }
+        LambdaQueryWrapper<Product> wrapper = new LambdaQueryWrapper<Product>()
+                .eq(Product::getStatus, 1)
+                .orderByDesc(Product::getSales)
+                .orderByAsc(Product::getId);
+        if (!excludeIds.isEmpty()) {
+            wrapper.notIn(Product::getId, excludeIds);
+        }
+        // 用分页对象限制条数，避免字符串拼接 LIMIT
+        Page<Product> page = productMapper.selectPage(new Page<>(1, limit), wrapper);
+        for (Product product : page.getRecords()) {
+            target.add(new ScoredItem(product.getId(), 0.0, "热销商品"));
+        }
     }
 }

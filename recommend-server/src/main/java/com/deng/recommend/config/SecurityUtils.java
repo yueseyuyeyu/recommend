@@ -31,6 +31,22 @@ public final class SecurityUtils {
     }
 
     /**
+     * 获取当前登录用户 ID，未登录返回 null。
+     *
+     * <p>用于「登录与游客都能访问、但登录后效果更好」的接口，
+     * 例如首页推荐流：游客走热门补位，登录用户走个性化推荐。
+     *
+     * @return 用户 ID，或 null
+     */
+    public static Long currentUserIdOrNull() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || !(authentication.getPrincipal() instanceof UserPrincipal principal)) {
+            return null;
+        }
+        return principal.getUserId();
+    }
+
+    /**
      * 获取当前登录用户名。
      */
     public static String currentUsername() {

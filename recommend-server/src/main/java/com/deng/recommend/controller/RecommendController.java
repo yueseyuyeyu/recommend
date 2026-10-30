@@ -1,5 +1,6 @@
 package com.deng.recommend.controller;
 
+import com.deng.recommend.common.PageResult;
 import com.deng.recommend.common.Result;
 import com.deng.recommend.config.SecurityUtils;
 import com.deng.recommend.recommend.evaluator.RecommendEvaluator;
@@ -79,6 +80,23 @@ public class RecommendController {
                                             @RequestParam(defaultValue = "10") int topN) {
         Long userId = SecurityUtils.currentUserId();
         return Result.success(recommendService.recommendHybrid(userId, itemId, topN));
+    }
+
+    /**
+     * 首页推荐流，支持分页，供无限滚动使用。
+     *
+     * <p>公开访问：游客传不出 userId，服务端会自动降级为「热门 + 销量」序列，
+     * 保证页面滚到底始终有内容可加载。
+     *
+     * @param pageNum  页码，从 1 开始
+     * @param pageSize 每页数量，默认 10
+     * @return 分页推荐结果
+     */
+    @GetMapping("/feed")
+    public Result<PageResult<RecommendVO>> feed(@RequestParam(defaultValue = "1") int pageNum,
+                                                @RequestParam(defaultValue = "10") int pageSize) {
+        return Result.success(
+                recommendService.recommendFeed(SecurityUtils.currentUserIdOrNull(), pageNum, pageSize));
     }
 
     /**
