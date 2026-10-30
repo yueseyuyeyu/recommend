@@ -11,6 +11,7 @@ import com.deng.recommend.entity.Category;
 import com.deng.recommend.entity.Product;
 import com.deng.recommend.mapper.CategoryMapper;
 import com.deng.recommend.mapper.ProductMapper;
+import com.deng.recommend.service.CategoryService;
 import com.deng.recommend.service.ProductService;
 import com.deng.recommend.vo.ProductVO;
 import lombok.RequiredArgsConstructor;
@@ -37,14 +38,21 @@ public class ProductServiceImpl implements ProductService {
 
     private final ProductMapper productMapper;
     private final CategoryMapper categoryMapper;
+    private final CategoryService categoryService;
 
     @Override
     public PageResult<ProductVO> page(ProductQuery query, long pageNum, long pageSize) {
+        // 商品挂在最末级类目上，所以按类目筛选要展开成整棵子树，
+        // 否则点「手机数码」这种一级类目会查不到任何商品
+        List<Long> categoryIds = query.getCategoryId() == null
+                ? null
+                : categoryService.selfAndDescendantIds(query.getCategoryId());
+
         LambdaQueryWrapper<Product> wrapper = new LambdaQueryWrapper<Product>()
                 // 前台只展示上架商品
                 .eq(Product::getStatus, 1)
                 .like(StringUtils.hasText(query.getKeyword()), Product::getName, query.getKeyword())
-                .eq(query.getCategoryId() != null, Product::getCategoryId, query.getCategoryId())
+                .in(categoryIds != null && !categoryIds.isEmpty(), Product::getCategoryId, categoryIds)
                 .ge(query.getMinPrice() != null, Product::getPrice, query.getMinPrice())
                 .le(query.getMaxPrice() != null, Product::getPrice, query.getMaxPrice());
 
