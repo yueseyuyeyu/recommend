@@ -38,8 +38,16 @@ public class RecommendProperties {
     /** 是否启用推荐结果缓存 */
     private boolean enableCache = true;
 
-    /** 推荐结果缓存有效期（秒） */
+    /** 推荐结果缓存有效期（秒），同时用于首页推荐流的排行池 */
     private long cacheTtlSeconds = 1800;
+
+    /**
+     * 首页推荐流排行池大小。
+     *
+     * <p>算法只在首次请求时算这么多条并缓存，后续翻页只做内存切片，
+     * 因此单次翻页耗时与页码无关——这正是游标分页要解决的问题。
+     */
+    private int feedPoolSize = 300;
 
     /** 单次推荐计算允许加载的最大行为记录数，防止数据量增长后拖垮接口 */
     private int maxBehaviorRows = 200000;

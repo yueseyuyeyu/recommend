@@ -1,10 +1,10 @@
 package com.deng.recommend.controller;
 
-import com.deng.recommend.common.PageResult;
 import com.deng.recommend.common.Result;
 import com.deng.recommend.config.SecurityUtils;
 import com.deng.recommend.recommend.evaluator.RecommendEvaluator;
 import com.deng.recommend.service.RecommendService;
+import com.deng.recommend.vo.FeedPageVO;
 import com.deng.recommend.vo.RecommendVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
@@ -83,20 +83,22 @@ public class RecommendController {
     }
 
     /**
-     * 首页推荐流，支持分页，供无限滚动使用。
+     * 首页推荐流，游标分页，供无限滚动使用。
      *
-     * <p>公开访问：游客传不出 userId，服务端会自动降级为「热门 + 销量」序列，
-     * 保证页面滚到底始终有内容可加载。
+     * <p>公开访问：游客传不出 userId，服务端会自动降级为「热门 + 销量」序列。
      *
-     * @param pageNum  页码，从 1 开始
+     * <p>首次请求不传 {@code cursor}；之后把上一页返回的 {@code nextCursor} 原样回传。
+     * {@code nextCursor} 为 null 表示到底了。
+     *
+     * @param cursor   上一页返回的游标，首页传 null
      * @param pageSize 每页数量，默认 10
-     * @return 分页推荐结果
+     * @return 本页数据 + 下一页游标
      */
     @GetMapping("/feed")
-    public Result<PageResult<RecommendVO>> feed(@RequestParam(defaultValue = "1") int pageNum,
-                                                @RequestParam(defaultValue = "10") int pageSize) {
+    public Result<FeedPageVO> feed(@RequestParam(required = false) String cursor,
+                                   @RequestParam(defaultValue = "10") int pageSize) {
         return Result.success(
-                recommendService.recommendFeed(SecurityUtils.currentUserIdOrNull(), pageNum, pageSize));
+                recommendService.recommendFeed(SecurityUtils.currentUserIdOrNull(), cursor, pageSize));
     }
 
     /**

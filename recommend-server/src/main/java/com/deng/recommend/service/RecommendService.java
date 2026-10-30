@@ -1,7 +1,7 @@
 package com.deng.recommend.service;
 
-import com.deng.recommend.common.PageResult;
 import com.deng.recommend.recommend.evaluator.RecommendEvaluator;
+import com.deng.recommend.vo.FeedPageVO;
 import com.deng.recommend.vo.RecommendVO;
 
 import java.util.List;
@@ -36,24 +36,24 @@ public interface RecommendService {
     List<RecommendVO> recommendHybrid(Long userId, Long itemId, int topN);
 
     /**
-     * 分页推荐流，供首页无限滚动使用。
+     * 首页推荐流，游标分页，供无限滚动使用。
      *
-     * <p><b>为什么需要它</b>：{@link #recommendForUser} 只能返回固定 Top-N，
-     * 首页想「滚到底继续加载」就必须能翻页，且翻页过程中不能出现重复商品。
+     * <p><b>为什么是游标而不是页码</b>：页码分页只能用
+     * {@code topN = pageNum × pageSize} 取候选前缀再切片，页码越深算法算得越多，
+     * 耗时随滑动距离线性增长。
      *
-     * <p><b>实现思路</b>：算法是纯函数，给定相同输入必然返回相同序列，
-     * 因此用 {@code topN = pageNum × pageSize} 取候选前缀再切片，
-     * 天然保证第 1 页是第 2 页的前缀，不会重复也不会跳项。
+     * <p><b>本实现</b>：首次请求把整个排行池（{@code recommend.feed-pool-size}，默认 300）
+     * 算好并缓存，之后每次翻页只从缓存切一段，单次耗时与页码无关。
      *
-     * <p><b>候选耗尽怎么办</b>：协同过滤的候选池有限（只覆盖行为矩阵里出现过的商品），
-     * 翻到后面会不够。此时按销量从商品表补足，保证无限滚动始终有内容。
+     * <p><b>候选池耗尽</b>：协同过滤只覆盖行为矩阵里出现过的商品，
+     * 池子不满时按销量从商品表补足，保证仍然能一直往下翻。
      *
-     * @param userId   当前用户，可为 null（游客走热门）
-     * @param pageNum  页码，从 1 开始
+     * @param userId   当前用户，可为 null（游客走热门补位）
+     * @param cursor   上一页返回的 {@code nextCursor}；首页传 null
      * @param pageSize 每页数量，最大 50
-     * @return 分页推荐结果，{@code total} 为在售商品总数
+     * @return 本页数据 + 下一页游标
      */
-    PageResult<RecommendVO> recommendFeed(Long userId, int pageNum, int pageSize);
+    FeedPageVO recommendFeed(Long userId, String cursor, int pageSize);
 
     /**
      * 离线评测，输出 Precision / Recall / F1 / Coverage。
