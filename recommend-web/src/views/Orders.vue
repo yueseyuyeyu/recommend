@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { cancelOrder, getOrderDetail, getOrders } from '../api'
+import { cancelOrder, confirmReceipt, getOrderDetail, getOrders } from '../api'
 
 const router = useRouter()
 const loading = ref(false)
@@ -31,6 +31,26 @@ async function loadOrders() {
 /** 去收银台付款；本页只做订单查看与状态操作，不承担下单职责 */
 function handlePay(row) {
   router.push(`/pay/${row.orderNo}`)
+}
+
+/** 确认收货：只有已发货的订单能点 */
+async function handleReceipt(row) {
+  try {
+    await ElMessageBox.confirm(
+      `确认已经收到订单 ${row.orderNo} 的商品了吗？确认后订单将标记为已完成。`,
+      '确认收货',
+      { type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await confirmReceipt(row.orderNo)
+    ElMessage.success('已确认收货')
+    await loadOrders()
+  } catch {
+    await loadOrders()
+  }
 }
 
 async function handleCancel(row) {
@@ -112,11 +132,14 @@ onMounted(loadOrders)
         <el-table-column label="下单时间" width="170">
           <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="190">
+        <el-table-column label="操作" width="240">
           <template #default="{ row }">
             <el-button link type="primary" @click="handleDetail(row)">详情</el-button>
             <el-button v-if="row.status === 0" link type="warning" @click="handlePay(row)">
               去支付
+            </el-button>
+            <el-button v-if="row.status === 2" link type="success" @click="handleReceipt(row)">
+              确认收货
             </el-button>
             <el-button
               v-if="row.status === 0 || row.status === 1"
@@ -157,6 +180,9 @@ onMounted(loadOrders)
             </el-descriptions-item>
             <el-descriptions-item label="支付时间">
               {{ detail.paidTime ? formatTime(detail.paidTime) : '未支付' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="物流单号">
+              {{ detail.trackingNo || '未发货' }}
             </el-descriptions-item>
             <el-descriptions-item label="收货人">{{ detail.receiverName || '-' }}</el-descriptions-item>
             <el-descriptions-item label="联系电话">{{ detail.receiverPhone || '-' }}</el-descriptions-item>

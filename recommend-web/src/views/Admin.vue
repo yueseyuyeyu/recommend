@@ -15,6 +15,7 @@ import {
   getCategories,
   getStatistics,
   saveCategory,
+  shipOrder,
   updateCarousel,
   updateCarouselStatus,
   updateOrderStatus,
@@ -429,6 +430,36 @@ async function handleOrderAction(row, targetStatus, actionName) {
   } catch {
     // 失败时重新拉取，保证界面与真实状态一致
     await loadAdminOrders()
+  }
+}
+
+/* ---------- 发货弹窗（必须填物流单号） ---------- */
+const shipDialog = ref(false)
+const shipSaving = ref(false)
+const shipForm = reactive({ orderNo: '', trackingNo: '' })
+
+function openShipDialog(row) {
+  shipForm.orderNo = row.orderNo
+  shipForm.trackingNo = ''
+  shipDialog.value = true
+}
+
+async function submitShip() {
+  const trackingNo = shipForm.trackingNo.trim()
+  if (!trackingNo) {
+    ElMessage.warning('请填写物流单号')
+    return
+  }
+  shipSaving.value = true
+  try {
+    await shipOrder(shipForm.orderNo, trackingNo)
+    ElMessage.success('已发货')
+    shipDialog.value = false
+    await Promise.all([loadAdminOrders(), loadStats()])
+  } catch {
+    // 错误提示由拦截器处理
+  } finally {
+    shipSaving.value = false
   }
 }
 
@@ -860,9 +891,14 @@ onMounted(() => {
                 <span class="muted">{{ row.payTypeName || '—' }}</span>
               </template>
             </el-table-column>
+            <el-table-column label="物流单号" width="170">
+              <template #default="{ row }">
+                <span class="muted">{{ row.trackingNo || '—' }}</span>
+              </template>
+            </el-table-column>
             <el-table-column label="操作" width="190">
               <template #default="{ row }">
-                <el-button v-if="row.status === 1" link type="primary" @click="handleOrderAction(row, 2, '发货')">
+                <el-button v-if="row.status === 1" link type="primary" @click="openShipDialog(row)">
                   发货
                 </el-button>
                 <el-button v-if="row.status === 2" link type="success" @click="handleOrderAction(row, 3, '完成')">
@@ -941,6 +977,27 @@ onMounted(() => {
         </el-card>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- ============ 发货弹窗 ============ -->
+    <el-dialog v-model="shipDialog" title="订单发货" width="440px">
+      <el-form label-width="90px" @submit.prevent>
+        <el-form-item label="订单号">
+          <span class="muted">{{ shipForm.orderNo }}</span>
+        </el-form-item>
+        <el-form-item label="物流单号" required>
+          <el-input
+            v-model="shipForm.trackingNo"
+            maxlength="64"
+            placeholder="请输入快递单号，例如 SF1234567890"
+            @keyup.enter="submitShip"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="shipDialog = false">取消</el-button>
+        <el-button type="primary" :loading="shipSaving" @click="submitShip">确认发货</el-button>
+      </template>
+    </el-dialog>
 
     <!-- ============ 轮播图编辑弹窗 ============ -->
     <el-dialog

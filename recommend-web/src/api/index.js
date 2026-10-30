@@ -87,6 +87,8 @@ export const cancelOrder = (orderNo) => http.post(`/orders/${orderNo}/cancel`)
 /** 支付订单，payType: 1-支付宝 2-微信支付 3-银行卡 */
 export const payOrder = (orderNo, payType) =>
   http.post(`/orders/${orderNo}/pay`, null, { params: { payType } })
+/** 确认收货：已发货 → 已完成 */
+export const confirmReceipt = (orderNo) => http.post(`/orders/${orderNo}/receipt`)
 
 /* ===== 后台 ===== */
 export const getStatistics = () => http.get('/admin/statistics')
@@ -104,6 +106,9 @@ export const updateUserStatus = (id, status) =>
 export const getAdminOrders = (params) => http.get('/admin/orders', { params })
 export const updateOrderStatus = (orderNo, status) =>
   http.put(`/admin/orders/${orderNo}/status`, null, { params: { status } })
+/** 发货，必须带物流单号 */
+export const shipOrder = (orderNo, trackingNo) =>
+  http.post(`/admin/orders/${orderNo}/ship`, null, { params: { trackingNo } })
 
 /* ===== 后台：轮播图管理 ===== */
 export const getAdminCarousels = () => http.get('/admin/carousels')
