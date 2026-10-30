@@ -13,6 +13,7 @@ import com.deng.recommend.entity.OrderItem;
 import com.deng.recommend.entity.Product;
 import com.deng.recommend.entity.User;
 import com.deng.recommend.entity.enums.OrderStatus;
+import com.deng.recommend.entity.enums.PayType;
 import com.deng.recommend.mapper.BehaviorMapper;
 import com.deng.recommend.mapper.CarouselMapper;
 import com.deng.recommend.mapper.CategoryMapper;
@@ -35,10 +36,12 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -59,6 +62,9 @@ public class AdminServiceImpl implements AdminService {
     private final OrderMapper orderMapper;
     private final OrderItemMapper orderItemMapper;
     private final BehaviorMapper behaviorMapper;
+
+    /** 类目最大层级：一级 → 二级 → 三级 */
+    private static final int MAX_CATEGORY_LEVEL = 3;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -138,6 +144,10 @@ public class AdminServiceImpl implements AdminService {
         if (category.getSortOrder() == null) {
             category.setSortOrder(0);
         }
+        // 前端会把四级选项置灰，但接口不能只靠前端把关
+        if (category.getParentId() != 0L) {
+            ensureDepthAllowed(category.getParentId());
+        }
         if (category.getId() == null) {
             categoryMapper.insert(category);
         } else {
@@ -147,8 +157,7 @@ public class AdminServiceImpl implements AdminService {
     }
 
     @Override
-    public void deleteCategory(Long id) {
-        Long childCount = categoryMapper.selectCount(new LambdaQueryWrapper<Category>()
+    public void deleteCategory(Long id) {        Long childCount = categoryMapper.selectCount(new LambdaQueryWrapper<Category>()
                 .eq(Category::getParentId, id));
         if (childCount != null && childCount > 0) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "请先删除子类目");
@@ -290,6 +299,9 @@ public class AdminServiceImpl implements AdminService {
                 .totalAmount(order.getTotalAmount())
                 .status(order.getStatus())
                 .statusName(OrderStatus.of(order.getStatus()).getName())
+                .payType(order.getPayType())
+                .payTypeName(PayType.nameOf(order.getPayType()))
+                .paidTime(order.getPaidTime())
                 .receiverName(order.getReceiverName())
                 .receiverPhone(order.getReceiverPhone())
                 .receiverAddr(order.getReceiverAddr())
@@ -361,5 +373,28 @@ public class AdminServiceImpl implements AdminService {
         update.setId(id);
         update.setStatus(status);
         carouselMapper.updateById(update);
+    }
+
+    /**
+     * 校验在给定父级下再挂一层是否会超出层级上限。
+     *
+     * <p>做法是从父级往上数祖先，父级深度 + 1 就是新节点的深度。
+     * 用 visited 兜住数据异常造成的环，避免死循环。
+     */
+    private void ensureDepthAllowed(Long parentId) {
+        int parentDepth = 0;
+        Long current = parentId;
+        Set<Long> visited = new HashSet<>();
+
+        while (current != null && current != 0L && visited.add(current)) {
+            parentDepth++;
+            Category parent = categoryMapper.selectById(current);
+            current = parent == null ? 0L : parent.getParentId();
+        }
+
+        if (parentDepth + 1 > MAX_CATEGORY_LEVEL) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "类目最多支持 " + MAX_CATEGORY_LEVEL + " 级");
+        }
     }
 }

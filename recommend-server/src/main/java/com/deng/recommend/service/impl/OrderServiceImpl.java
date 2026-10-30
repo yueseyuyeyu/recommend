@@ -14,6 +14,7 @@ import com.deng.recommend.entity.OrderItem;
 import com.deng.recommend.entity.Product;
 import com.deng.recommend.entity.enums.BehaviorType;
 import com.deng.recommend.entity.enums.OrderStatus;
+import com.deng.recommend.entity.enums.PayType;
 import com.deng.recommend.mapper.BehaviorMapper;
 import com.deng.recommend.mapper.CartMapper;
 import com.deng.recommend.mapper.OrderItemMapper;
@@ -97,6 +98,10 @@ public class OrderServiceImpl implements OrderService {
         order.setUserId(userId);
         order.setTotalAmount(totalAmount);
         order.setStatus(OrderStatus.PENDING.getCode());
+        // 支付方式在下单时选定，真正支付时才置为已支付
+        if (request.getPayType() != null) {
+            order.setPayType(PayType.of(request.getPayType()).getCode());
+        }
 
         // 收货信息：优先用地址簿（服务端回查，杜绝前端伪造），否则用请求里的手填值
         ReceiverInfo receiver = resolveReceiver(userId, request);
@@ -192,6 +197,27 @@ public class OrderServiceImpl implements OrderService {
         log.info("取消订单成功, userId={}, orderNo={}", userId, orderNo);
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void pay(Long userId, String orderNo, Integer payType) {
+        Order order = getOwnedOrder(userId, orderNo);
+
+        if (order.getStatus() == null || order.getStatus() != OrderStatus.PENDING.getCode()) {
+            throw new BusinessException(ResultCode.ORDER_STATUS_ILLEGAL, "该订单不是待支付状态，无法支付");
+        }
+
+        PayType type = PayType.of(payType);
+
+        Order update = new Order();
+        update.setId(order.getId());
+        update.setStatus(OrderStatus.PAID.getCode());
+        update.setPayType(type.getCode());
+        update.setPaidTime(LocalDateTime.now());
+        orderMapper.updateById(update);
+
+        log.info("订单支付成功, userId={}, orderNo={}, payType={}", userId, orderNo, type.getName());
+    }
+
     /**
      * 生成业务订单号：{@code NO} + 时间戳(yyyyMMddHHmmss) + 6 位随机数。
      */
@@ -212,6 +238,9 @@ public class OrderServiceImpl implements OrderService {
                 .totalAmount(order.getTotalAmount())
                 .status(order.getStatus())
                 .statusName(order.getStatusEnum().getName())
+                .payType(order.getPayType())
+                .payTypeName(PayType.nameOf(order.getPayType()))
+                .paidTime(order.getPaidTime())
                 .receiverName(order.getReceiverName())
                 .receiverPhone(order.getReceiverPhone())
                 .receiverAddr(order.getReceiverAddr())

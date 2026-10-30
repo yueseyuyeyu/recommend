@@ -20,6 +20,9 @@ public class OrderCreateRequest {
     /** 收货地址 ID，来自地址簿 */
     private Long addressId;
 
+    /** 支付方式码：1-支付宝，2-微信支付，3-银行卡；下单时选定，支付时确认 */
+    private Integer payType;
+
     @Size(max = 64, message = "收货人过长")
     private String receiverName;
 

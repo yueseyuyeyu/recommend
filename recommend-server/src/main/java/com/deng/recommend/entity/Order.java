@@ -35,6 +35,9 @@ public class Order {
     /** 状态码，取值见 {@link OrderStatus} */
     private Integer status;
 
+    /** 支付方式码，取值见 {@link com.deng.recommend.entity.enums.PayType}；未支付前为 null */
+    private Integer payType;
+
     private String receiverName;
 
     private String receiverPhone;

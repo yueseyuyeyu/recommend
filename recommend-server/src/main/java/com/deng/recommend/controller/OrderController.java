@@ -76,4 +76,21 @@ public class OrderController {
         orderService.cancel(SecurityUtils.currentUserId(), orderNo);
         return Result.success();
     }
+
+    /**
+     * 支付订单。
+     *
+     * <p>只接受待支付订单；支付方式由前端在下单时选好、这里再确认一次，
+     * 避免用户在下单和支付之间改了主意却没同步到订单上。
+     *
+     * @param orderNo 订单号
+     * @param payType 支付方式码：1-支付宝，2-微信支付，3-银行卡
+     * @return 空数据
+     */
+    @PostMapping("/{orderNo}/pay")
+    public Result<Void> pay(@PathVariable String orderNo,
+                            @RequestParam Integer payType) {
+        orderService.pay(SecurityUtils.currentUserId(), orderNo, payType);
+        return Result.success();
+    }
 }

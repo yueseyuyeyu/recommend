@@ -48,4 +48,17 @@ public interface OrderService {
      * @param orderNo 订单号
      */
     void cancel(Long userId, String orderNo);
+
+    /**
+     * 支付订单：把待支付订单流转为已支付。
+     *
+     * <p>本项目不接真实支付渠道，这是一次受控的状态流转：
+     * 只有 {@code PENDING} 状态的订单可以支付，成功后记录支付方式与支付时间。
+     * 重复支付会被状态校验拦下，不需要额外的幂等键。
+     *
+     * @param userId  当前用户
+     * @param orderNo 订单号
+     * @param payType 支付方式码：1-支付宝，2-微信支付，3-银行卡
+     */
+    void pay(Long userId, String orderNo, Integer payType);
 }

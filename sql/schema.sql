@@ -136,6 +136,7 @@ CREATE TABLE `orders` (
   `user_id`        BIGINT        NOT NULL                COMMENT '用户ID',
   `total_amount`   DECIMAL(10,2) NOT NULL                COMMENT '订单总金额',
   `status`         TINYINT       NOT NULL DEFAULT 0      COMMENT '0-待支付 1-已支付 2-已发货 3-已完成 4-已取消',
+  `pay_type`       TINYINT       DEFAULT NULL            COMMENT '支付方式：1-支付宝，2-微信支付，3-银行卡',
   `receiver_name`  VARCHAR(64)   DEFAULT NULL            COMMENT '收货人',
   `receiver_phone` VARCHAR(32)   DEFAULT NULL            COMMENT '联系电话',
   `receiver_addr`  VARCHAR(255)  DEFAULT NULL            COMMENT '收货地址',
