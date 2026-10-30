@@ -70,6 +70,68 @@ function percent(value) {
   return typeof value === 'number' ? `${(value * 100).toFixed(2)}%` : '-'
 }
 
+/**
+ * 评测指标说明。
+ *
+ * 每个指标都配三层信息：显示名、一句话白话解释、悬停时的计算口径。
+ * 目的是让没接触过推荐系统的人也能看懂这张表，而不是只看一堆百分比。
+ */
+const metricCards = computed(() => {
+  const data = evaluation.value
+  if (!data) return []
+
+  return [
+    {
+      key: 'precision',
+      label: 'Precision',
+      alias: '命中率',
+      value: percent(data.precision),
+      desc: `推荐 ${data.topN} 个，大约有 ${percent(data.precision)} 是用户真会点的`,
+      hint: '分子：推荐的 TopN 中确实出现在用户测试集里的商品数；分母：TopN × 参评用户数。衡量"推得准不准"。'
+    },
+    {
+      key: 'recall',
+      label: 'Recall',
+      alias: '召回率',
+      value: percent(data.recall),
+      desc: '用户会点的商品里，被推荐覆盖到的比例',
+      hint: '分子同上；分母：该用户在测试集里的商品总数。衡量"漏得严不严重"。'
+    },
+    {
+      key: 'f1',
+      label: 'F1',
+      alias: '综合分',
+      value: percent(data.f1),
+      desc: '命中率与召回率的调和平均，防止只优化一头',
+      hint: '2PR/(P+R)。只要命中率或召回率有一个很低，F1 就会被明显拉下来。'
+    },
+    {
+      key: 'coverage',
+      label: 'Coverage',
+      alias: '覆盖率',
+      value: percent(data.coverage),
+      desc: `全站 ${data.totalItemCount} 个商品里，被推荐过 ${data.recommendedItemCount} 个`,
+      hint: '覆盖率过低说明算法在反复推同样的爆款，个性化没有真正起作用。这一项要和平均流行度一起看。'
+    },
+    {
+      key: 'evaluatedUserCount',
+      label: '参评用户数',
+      alias: '样本量',
+      value: data.evaluatedUserCount ?? '-',
+      desc: '测试集里有行为、可以参与评估的用户数',
+      hint: '没有行为记录的用户无法评估，会被排除。样本量太小的情况下，指标波动会很大，参考价值有限。'
+    },
+    {
+      key: 'avgPopularity',
+      label: 'AvgPopularity',
+      alias: '平均流行度',
+      value: Number(data.avgPopularity || 0).toFixed(3),
+      desc: '推荐商品热度的对数均值，越低说明越不扎堆热门',
+      hint: '取的是 log1p(商品销量) 的平均值，不是平均销量本身。接近全站平均水平说明推荐接近热门榜，明显偏低说明更偏长尾。'
+    }
+  ]
+})
+
 /* ================= 商品管理 ================= */
 const products = ref([])
 const productTotal = ref(0)
@@ -663,20 +725,35 @@ onMounted(() => {
             title="采用留出法：80% 行为做训练，20% 做测试，TopN=10，实时计算 Precision / Recall / F1 / 覆盖率。"
           />
           <el-descriptions v-if="evaluation" :column="3" border>
-            <el-descriptions-item label="Precision">{{ percent(evaluation.precision) }}</el-descriptions-item>
-            <el-descriptions-item label="Recall">{{ percent(evaluation.recall) }}</el-descriptions-item>
-            <el-descriptions-item label="F1">{{ percent(evaluation.f1) }}</el-descriptions-item>
-            <el-descriptions-item label="覆盖率">
-              {{ percent(evaluation.coverage) }}
-              <span class="muted">
-                （{{ evaluation.recommendedItemCount }}/{{ evaluation.totalItemCount }}）
-              </span>
-            </el-descriptions-item>
-            <el-descriptions-item label="参评用户数">{{ evaluation.evaluatedUserCount }}</el-descriptions-item>
-            <el-descriptions-item label="平均流行度">
-              {{ Number(evaluation.avgPopularity || 0).toFixed(3) }}
+            <el-descriptions-item v-for="item in metricCards" :key="item.key">
+              <template #label>
+                <span class="metric-label">
+                  {{ item.label }}
+                  <el-tooltip :content="item.hint" placement="top" :show-after="150">
+                    <span class="metric-help">?</span>
+                  </el-tooltip>
+                </span>
+              </template>
+              <div class="metric-value">
+                {{ item.value }}
+                <span class="metric-alias">{{ item.alias }}</span>
+              </div>
+              <div class="metric-desc">{{ item.desc }}</div>
             </el-descriptions-item>
           </el-descriptions>
+
+          <div v-if="evaluation" class="metric-note">
+            <div class="metric-note-line">
+              <strong>怎么读这张表：</strong>
+              当前 TopN={{ evaluation.topN }}，留出法（80% 行为训练、20% 行为测试）。
+              Precision 要配 Coverage 一起看——只追命中率通常会牺牲推荐多样性。
+            </div>
+            <div class="metric-note-line">
+              <strong>数据说明：</strong>
+              本项目为单机本地环境，行为数据由种子脚本模拟生成（{{ evaluation.totalItemCount }} 个在售商品、{{ evaluation.evaluatedUserCount }} 位参评用户），
+              <strong>指标绝对值不代表线上效果</strong>，只有横向比较不同参数时才有参考意义。
+            </div>
+          </div>
           <el-empty v-else description="点击「运行评测」查看推荐算法指标" />
         </el-card>
       </el-tab-pane>
@@ -1195,6 +1272,77 @@ onMounted(() => {
   font-size: 12px;
   line-height: 1.5;
   color: #909399;
+}
+
+/* ---------- 评测指标 ---------- */
+.metric-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* 小问号：悬停显示计算口径 */
+.metric-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid #dcdfe6;
+  color: #909399;
+  font-size: 10px;
+  line-height: 1;
+  cursor: help;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.metric-help:hover {
+  border-color: #ff5000;
+  color: #ff5000;
+}
+
+.metric-value {
+  font-size: 17px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.metric-alias {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #909399;
+}
+
+.metric-desc {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #909399;
+}
+
+.metric-note {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #fafafa;
+  border-left: 3px solid #ff5000;
+}
+
+.metric-note-line {
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: #606266;
+}
+
+.metric-note-line + .metric-note-line {
+  margin-top: 2px;
+}
+
+.metric-note-line strong {
+  color: #303133;
+  font-weight: 600;
 }
 
 .carousel-preview {
