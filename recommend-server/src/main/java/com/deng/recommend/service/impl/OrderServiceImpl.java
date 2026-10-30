@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.deng.recommend.common.BusinessException;
 import com.deng.recommend.common.PageResult;
 import com.deng.recommend.common.ResultCode;
+import com.deng.recommend.config.SecurityUtils;
 import com.deng.recommend.dto.OrderCreateRequest;
 import com.deng.recommend.entity.Behavior;
 import com.deng.recommend.entity.Cart;
@@ -13,6 +14,8 @@ import com.deng.recommend.entity.Order;
 import com.deng.recommend.entity.OrderItem;
 import com.deng.recommend.entity.Product;
 import com.deng.recommend.entity.enums.BehaviorType;
+import com.deng.recommend.entity.enums.NotificationType;
+import com.deng.recommend.entity.enums.OperatorType;
 import com.deng.recommend.entity.enums.OrderStatus;
 import com.deng.recommend.entity.enums.PayType;
 import com.deng.recommend.mapper.BehaviorMapper;
@@ -21,9 +24,12 @@ import com.deng.recommend.mapper.OrderItemMapper;
 import com.deng.recommend.mapper.OrderMapper;
 import com.deng.recommend.mapper.ProductMapper;
 import com.deng.recommend.service.AddressService;
+import com.deng.recommend.service.NotificationService;
 import com.deng.recommend.service.OrderService;
+import com.deng.recommend.service.OrderStatusLogService;
 import com.deng.recommend.vo.AddressVO;
 import com.deng.recommend.vo.OrderItemVO;
+import com.deng.recommend.vo.OrderStatusLogVO;
 import com.deng.recommend.vo.OrderVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -64,6 +70,8 @@ public class OrderServiceImpl implements OrderService {
     private final ProductMapper productMapper;
     private final BehaviorMapper behaviorMapper;
     private final AddressService addressService;
+    private final OrderStatusLogService orderStatusLogService;
+    private final NotificationService notificationService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -109,6 +117,8 @@ public class OrderServiceImpl implements OrderService {
         order.setReceiverPhone(receiver.phone());
         order.setReceiverAddr(receiver.addr());
         orderMapper.insert(order);
+        orderStatusLogService.record(orderNo, null, OrderStatus.PENDING.getCode(),
+                OperatorType.USER, userId, currentOperatorName(), "创建订单");
 
         LocalDateTime now = LocalDateTime.now();
         List<Long> cartIds = new ArrayList<>(carts.size());
@@ -177,8 +187,27 @@ public class OrderServiceImpl implements OrderService {
     @Transactional(rollbackFor = Exception.class)
     public void cancel(Long userId, String orderNo) {
         Order order = getOwnedOrder(userId, orderNo);
-        doCancel(order);
+        doCancel(order, OperatorType.USER, userId, currentOperatorName(), "买家取消");
         log.info("取消订单成功, userId={}, orderNo={}", userId, orderNo);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void cancelByAdmin(String orderNo) {
+        Order order = orderMapper.selectOne(new LambdaQueryWrapper<Order>()
+                .eq(Order::getOrderNo, orderNo));
+        if (order == null) {
+            throw new BusinessException(ResultCode.ORDER_NOT_FOUND);
+        }
+        doCancel(order, OperatorType.ADMIN, SecurityUtils.currentUserId(), currentOperatorName(), "管理员取消");
+        log.info("管理员取消订单成功, orderNo={}", orderNo);
+    }
+
+    @Override
+    public List<OrderStatusLogVO> logs(Long userId, String orderNo) {
+        // 先校验归属，避免换个订单号就能看别人的流转记录
+        getOwnedOrder(userId, orderNo);
+        return orderStatusLogService.listByOrderNo(orderNo);
     }
 
     @Override
@@ -195,6 +224,10 @@ public class OrderServiceImpl implements OrderService {
         update.setId(order.getId());
         update.setStatus(OrderStatus.FINISHED.getCode());
         orderMapper.updateById(update);
+
+        orderStatusLogService.record(orderNo, OrderStatus.SHIPPED.getCode(), OrderStatus.FINISHED.getCode(),
+                OperatorType.USER, userId, currentOperatorName(), "买家确认收货");
+
         log.info("确认收货成功, userId={}, orderNo={}", userId, orderNo);
     }
 
@@ -217,7 +250,7 @@ public class OrderServiceImpl implements OrderService {
         int cancelled = 0;
         for (Order order : expired) {
             try {
-                doCancel(order);
+                doCancel(order, OperatorType.SYSTEM, null, "系统", "超时未支付自动取消");
                 cancelled++;
             } catch (Exception e) {
                 // 单笔失败不影响其余订单，下一轮扫描还会重试
@@ -235,13 +268,17 @@ public class OrderServiceImpl implements OrderService {
      * 注意不能在这里再调 {@code cancel()}——同类内部调用不会经过 Spring 代理，
      * {@code @Transactional} 会失效。
      */
-    private void doCancel(Order order) {
+    private void doCancel(Order order, OperatorType operatorType, Long operatorId,
+                          String operatorName, String remark) {
         if (!order.getStatusEnum().cancellable()) {
             throw new BusinessException(ResultCode.ORDER_NOT_CANCELLABLE);
         }
 
+        Integer fromStatus = order.getStatus();
+        String orderNo = order.getOrderNo();
+
         List<OrderItem> items = orderItemMapper.selectList(
-                new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderNo, order.getOrderNo()));
+                new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderNo, orderNo));
         for (OrderItem item : items) {
             LambdaUpdateWrapper<Product> wrapper = new LambdaUpdateWrapper<Product>()
                     .eq(Product::getId, item.getProductId())
@@ -253,6 +290,23 @@ public class OrderServiceImpl implements OrderService {
         update.setId(order.getId());
         update.setStatus(OrderStatus.CANCELLED.getCode());
         orderMapper.updateById(update);
+
+        orderStatusLogService.record(orderNo, fromStatus, OrderStatus.CANCELLED.getCode(),
+                operatorType, operatorId, operatorName, remark);
+    }
+
+    /**
+     * 取当前登录用户名，作为日志里的操作者名称快照。
+     *
+     * <p>定时任务等无请求上下文的场景取不到，返回 null 即可——
+     * 这类日志的操作者类型是 SYSTEM，本身就不需要人名。
+     */
+    private String currentOperatorName() {
+        try {
+            return SecurityUtils.currentUsername();
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     @Override
@@ -272,6 +326,14 @@ public class OrderServiceImpl implements OrderService {
         update.setPayType(type.getCode());
         update.setPaidTime(LocalDateTime.now());
         orderMapper.updateById(update);
+
+        orderStatusLogService.record(orderNo, OrderStatus.PENDING.getCode(), OrderStatus.PAID.getCode(),
+                OperatorType.USER, userId, currentOperatorName(), "支付方式：" + type.getName());
+
+        notificationService.push(order.getUserId(), NotificationType.ORDER_PAID,
+                "订单已支付",
+                "订单 " + orderNo + " 已通过" + type.getName() + "完成支付，金额 ￥" + order.getTotalAmount(),
+                "ORDER", orderNo);
 
         log.info("订单支付成功, userId={}, orderNo={}, payType={}", userId, orderNo, type.getName());
     }

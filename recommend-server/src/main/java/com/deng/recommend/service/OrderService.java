@@ -2,7 +2,10 @@ package com.deng.recommend.service;
 
 import com.deng.recommend.common.PageResult;
 import com.deng.recommend.dto.OrderCreateRequest;
+import com.deng.recommend.vo.OrderStatusLogVO;
 import com.deng.recommend.vo.OrderVO;
+
+import java.util.List;
 
 /**
  * 订单服务。
@@ -83,4 +86,22 @@ public interface OrderService {
      * @return 本轮实际取消的订单数
      */
     int cancelExpiredOrders(int timeoutMinutes);
+
+    /**
+     * 查询订单的状态变更历史，仅限订单本人。
+     *
+     * @param userId  当前用户
+     * @param orderNo 订单号
+     * @return 按发生时间正序的变更记录
+     */
+    List<OrderStatusLogVO> logs(Long userId, String orderNo);
+
+    /**
+     * 管理员取消订单。
+     *
+     * <p>与买家取消共用同一套库存回滚逻辑，区别只在于日志里记录的操作者是 ADMIN。
+     *
+     * @param orderNo 订单号
+     */
+    void cancelByAdmin(String orderNo);
 }

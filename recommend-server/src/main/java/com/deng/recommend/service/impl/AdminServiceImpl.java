@@ -6,12 +6,15 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.deng.recommend.common.BusinessException;
 import com.deng.recommend.common.PageResult;
 import com.deng.recommend.common.ResultCode;
+import com.deng.recommend.config.SecurityUtils;
 import com.deng.recommend.entity.Carousel;
 import com.deng.recommend.entity.Category;
 import com.deng.recommend.entity.Order;
 import com.deng.recommend.entity.OrderItem;
 import com.deng.recommend.entity.Product;
 import com.deng.recommend.entity.User;
+import com.deng.recommend.entity.enums.NotificationType;
+import com.deng.recommend.entity.enums.OperatorType;
 import com.deng.recommend.entity.enums.OrderStatus;
 import com.deng.recommend.entity.enums.PayType;
 import com.deng.recommend.mapper.BehaviorMapper;
@@ -22,7 +25,9 @@ import com.deng.recommend.mapper.OrderMapper;
 import com.deng.recommend.mapper.ProductMapper;
 import com.deng.recommend.mapper.UserMapper;
 import com.deng.recommend.service.AdminService;
+import com.deng.recommend.service.NotificationService;
 import com.deng.recommend.service.OrderService;
+import com.deng.recommend.service.OrderStatusLogService;
 import com.deng.recommend.vo.CarouselVO;
 import com.deng.recommend.vo.OrderItemVO;
 import com.deng.recommend.vo.OrderVO;
@@ -64,6 +69,8 @@ public class AdminServiceImpl implements AdminService {
     private final OrderItemMapper orderItemMapper;
     private final BehaviorMapper behaviorMapper;
     private final OrderService orderService;
+    private final OrderStatusLogService orderStatusLogService;
+    private final NotificationService notificationService;
 
     /** 类目最大层级：一级 → 二级 → 三级 */
     private static final int MAX_CATEGORY_LEVEL = 3;
@@ -247,8 +254,7 @@ public class AdminServiceImpl implements AdminService {
 
         // 取消复用用户侧逻辑，库存回滚只写一份，避免两边行为不一致
         if (target == OrderStatus.CANCELLED) {
-            orderService.cancel(order.getUserId(), orderNo);
-            log.info("后台取消订单, orderNo={}", orderNo);
+            orderService.cancelByAdmin(orderNo);
             return;
         }
 
@@ -261,6 +267,10 @@ public class AdminServiceImpl implements AdminService {
         update.setId(order.getId());
         update.setStatus(target.getCode());
         orderMapper.updateById(update);
+
+        orderStatusLogService.record(orderNo, current.getCode(), target.getCode(),
+                OperatorType.ADMIN, SecurityUtils.currentUserId(), currentOperatorName(), "管理员变更状态");
+
         log.info("订单状态变更, orderNo={}, {} -> {}", orderNo, current.getName(), target.getName());
     }
 
@@ -288,6 +298,15 @@ public class AdminServiceImpl implements AdminService {
         update.setStatus(OrderStatus.SHIPPED.getCode());
         update.setTrackingNo(trackingNo.trim());
         orderMapper.updateById(update);
+
+        orderStatusLogService.record(orderNo, OrderStatus.PAID.getCode(), OrderStatus.SHIPPED.getCode(),
+                OperatorType.ADMIN, SecurityUtils.currentUserId(), currentOperatorName(),
+                "物流单号：" + trackingNo.trim());
+
+        notificationService.push(order.getUserId(), NotificationType.ORDER_SHIPPED,
+                "订单已发货",
+                "您的订单 " + orderNo + " 已发货，物流单号 " + trackingNo.trim() + "，请注意查收。",
+                "ORDER", orderNo);
 
         log.info("订单发货, orderNo={}, trackingNo={}", orderNo, trackingNo.trim());
     }
@@ -424,6 +443,17 @@ public class AdminServiceImpl implements AdminService {
         update.setId(id);
         update.setStatus(status);
         carouselMapper.updateById(update);
+    }
+
+    /**
+     * 取当前管理员用户名，作为状态日志的操作者快照。
+     */
+    private String currentOperatorName() {
+        try {
+            return SecurityUtils.currentUsername();
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /**

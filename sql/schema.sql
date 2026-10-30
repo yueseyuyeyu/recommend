@@ -243,6 +243,44 @@ CREATE TABLE `user_address` (
   KEY `idx_user_default` (`user_id`, `is_default`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '用户收货地址表';
 
+-- ----------------------------
+-- 12. 订单状态变更日志表
+--     只追加不修改，用于追溯「谁在什么时候把订单改成了什么」
+-- ----------------------------
+DROP TABLE IF EXISTS `order_status_log`;
+CREATE TABLE `order_status_log` (
+  `id`            BIGINT      NOT NULL AUTO_INCREMENT COMMENT '日志ID',
+  `order_no`      VARCHAR(32) NOT NULL                COMMENT '订单号',
+  `from_status`   TINYINT     DEFAULT NULL            COMMENT '变更前状态，创建时为空',
+  `to_status`     TINYINT     NOT NULL                COMMENT '变更后状态',
+  `operator_type` VARCHAR(16) NOT NULL                COMMENT '操作者类型：USER-用户，ADMIN-管理员，SYSTEM-系统',
+  `operator_id`   BIGINT      DEFAULT NULL            COMMENT '操作者ID，系统操作时为空',
+  `operator_name` VARCHAR(64) DEFAULT NULL            COMMENT '操作者名称快照',
+  `remark`        VARCHAR(255) DEFAULT NULL           COMMENT '备注，如物流单号、取消原因',
+  `create_time`   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '发生时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_order_no` (`order_no`, `id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '订单状态变更日志表';
+
+-- ----------------------------
+-- 13. 站内通知表
+--     无真实推送通道时承载「发货提醒」等消息，前端铃铛展示未读数
+-- ----------------------------
+DROP TABLE IF EXISTS `notification`;
+CREATE TABLE `notification` (
+  `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '通知ID',
+  `user_id`     BIGINT       NOT NULL                COMMENT '接收用户ID',
+  `type`        VARCHAR(32)  NOT NULL                COMMENT '类型：ORDER_SHIPPED 等',
+  `title`       VARCHAR(128) NOT NULL                COMMENT '标题',
+  `content`     VARCHAR(500) DEFAULT NULL            COMMENT '正文',
+  `biz_type`    VARCHAR(32)  DEFAULT NULL            COMMENT '关联业务类型，如 ORDER',
+  `biz_id`      VARCHAR(64)  DEFAULT NULL            COMMENT '关联业务标识，如订单号',
+  `is_read`     TINYINT      NOT NULL DEFAULT 0      COMMENT '是否已读：1-是，0-否',
+  `create_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_user_read` (`user_id`, `is_read`, `id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '站内通知表';
+
 -- 轮播图初始数据
 INSERT INTO `carousel` (`title`, `subtitle`, `bg_color`, `link_url`, `sort_order`, `status`) VALUES
 ('个性化推荐引擎', '基于 UserCF 与 ItemCF 双引擎，为你挑选真正感兴趣的商品', 'linear-gradient(135deg,#ff6a00,#ee0979)', '/products', 1, 1),

@@ -5,6 +5,7 @@ import com.deng.recommend.common.Result;
 import com.deng.recommend.config.SecurityUtils;
 import com.deng.recommend.dto.OrderCreateRequest;
 import com.deng.recommend.service.OrderService;
+import com.deng.recommend.vo.OrderStatusLogVO;
 import com.deng.recommend.vo.OrderVO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +16,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * 订单接口。
@@ -103,5 +106,13 @@ public class OrderController {
     public Result<Void> confirmReceipt(@PathVariable String orderNo) {
         orderService.confirmReceipt(SecurityUtils.currentUserId(), orderNo);
         return Result.success();
+    }
+
+    /**
+     * 订单状态变更历史，用于详情页时间轴。
+     */
+    @GetMapping("/{orderNo}/logs")
+    public Result<List<OrderStatusLogVO>> logs(@PathVariable String orderNo) {
+        return Result.success(orderService.logs(SecurityUtils.currentUserId(), orderNo));
     }
 }
