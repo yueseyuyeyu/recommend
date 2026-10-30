@@ -115,9 +115,12 @@ export const updateUserStatus = (id, status) =>
 export const getAdminOrders = (params) => http.get('/admin/orders', { params })
 export const updateOrderStatus = (orderNo, status) =>
   http.put(`/admin/orders/${orderNo}/status`, null, { params: { status } })
-/** 发货，必须带物流单号 */
-export const shipOrder = (orderNo, trackingNo) =>
-  http.post(`/admin/orders/${orderNo}/ship`, null, { params: { trackingNo } })
+/** 发货：选择配送方，trackingNo 留空时后端按规则自动生成 */
+export const shipOrder = (orderNo, carrier, trackingNo) =>
+  http.post(`/admin/orders/${orderNo}/ship`, null, { params: { carrier, trackingNo: trackingNo || undefined } })
+/** 管理员确认收货，需发货满 7 天 */
+export const adminConfirmReceipt = (orderNo) =>
+  http.post(`/admin/orders/${orderNo}/confirm-receipt`)
 
 /* ===== 后台：轮播图管理 ===== */
 export const getAdminCarousels = () => http.get('/admin/carousels')

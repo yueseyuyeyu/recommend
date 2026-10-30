@@ -190,7 +190,13 @@ onMounted(loadOrders)
             <el-descriptions-item label="支付时间">
               {{ detail.paidTime ? formatTime(detail.paidTime) : '未支付' }}
             </el-descriptions-item>
-            <el-descriptions-item label="物流单号">
+            <el-descriptions-item label="配送方">
+              {{ detail.carrierName || '—' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="发货时间">
+              {{ detail.shipTime ? formatTime(detail.shipTime) : '未发货' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="物流单号" :span="2">
               {{ detail.trackingNo || '未发货' }}
             </el-descriptions-item>
             <el-descriptions-item label="收货人">{{ detail.receiverName || '-' }}</el-descriptions-item>

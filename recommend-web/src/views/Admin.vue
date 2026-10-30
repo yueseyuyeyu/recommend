@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  adminConfirmReceipt,
   createCarousel,
   createProduct,
   deleteCarousel,
@@ -495,33 +496,110 @@ async function handleOrderAction(row, targetStatus, actionName) {
   }
 }
 
-/* ---------- 发货弹窗（必须填物流单号） ---------- */
+/* ---------- 发货弹窗（选配送方 + 自动生成单号） ---------- */
+/** 与后端 Carrier 枚举保持一致 */
+const CARRIERS = [
+  { code: 'SF', name: '顺丰速运', sample: 'SF + 13 位数字' },
+  { code: 'EMS', name: '中国邮政', sample: 'E + 9 位数字 + CN' },
+  { code: 'ZTO', name: '中通快递', sample: '75 开头共 12 位' },
+  { code: 'YTO', name: '圆通速递', sample: 'YT + 13 位数字' },
+  { code: 'YUNDA', name: '韵达快递', sample: '43 开头共 12 位' },
+  { code: 'JD', name: '京东物流', sample: 'JD + 12 位数字' }
+]
+
 const shipDialog = ref(false)
 const shipSaving = ref(false)
-const shipForm = reactive({ orderNo: '', trackingNo: '' })
+const shipForm = reactive({ orderNo: '', carrier: 'SF', trackingNo: '' })
+
+/**
+ * 本地生成一个格式正确的单号，仅用于弹窗里的即时预览。
+ * 真正落库的单号以后端生成为准——管理员清空后提交，后端会重新生成。
+ */
+function generateTrackingNo(code) {
+  const rule = {
+    SF: () => 'SF' + randomDigits(13),
+    EMS: () => 'E' + randomDigits(9) + 'CN',
+    ZTO: () => '75' + randomDigits(10),
+    YTO: () => 'YT' + randomDigits(13),
+    YUNDA: () => '43' + randomDigits(10),
+    JD: () => 'JD' + randomDigits(12)
+  }[code]
+  return rule ? rule() : randomDigits(12)
+}
+
+function randomDigits(count) {
+  let out = ''
+  for (let i = 0; i < count; i += 1) {
+    out += Math.floor(Math.random() * 10)
+  }
+  return out
+}
 
 function openShipDialog(row) {
   shipForm.orderNo = row.orderNo
-  shipForm.trackingNo = ''
+  shipForm.carrier = 'SF'
+  shipForm.trackingNo = generateTrackingNo('SF')
   shipDialog.value = true
 }
 
+/** 换配送方时同步换一个符合该快递规则的单号 */
+function handleCarrierChange(code) {
+  shipForm.trackingNo = generateTrackingNo(code)
+}
+
 async function submitShip() {
-  const trackingNo = shipForm.trackingNo.trim()
-  if (!trackingNo) {
-    ElMessage.warning('请填写物流单号')
+  if (!shipForm.carrier) {
+    ElMessage.warning('请选择配送方')
     return
   }
   shipSaving.value = true
   try {
-    await shipOrder(shipForm.orderNo, trackingNo)
-    ElMessage.success('已发货')
+    const finalNo = await shipOrder(shipForm.orderNo, shipForm.carrier, shipForm.trackingNo.trim())
+    ElMessage.success(`已发货，物流单号 ${finalNo}`)
     shipDialog.value = false
     await Promise.all([loadAdminOrders(), loadStats()])
   } catch {
     // 错误提示由拦截器处理
   } finally {
     shipSaving.value = false
+  }
+}
+
+/* ---------- 管理员确认收货（需发货满 7 天） ---------- */
+const AUTO_RECEIPT_DAYS = 7
+
+/** 发货是否已满 7 天，未满时不给管理员确认收货的入口 */
+function receiptReady(row) {
+  if (!row.shipTime) return false
+  const shippedAt = new Date(row.shipTime).getTime()
+  if (Number.isNaN(shippedAt)) return false
+  return Date.now() - shippedAt >= AUTO_RECEIPT_DAYS * 24 * 3600 * 1000
+}
+
+function receiptRemainDays(row) {
+  if (!row.shipTime) return AUTO_RECEIPT_DAYS
+  const shippedAt = new Date(row.shipTime).getTime()
+  if (Number.isNaN(shippedAt)) return AUTO_RECEIPT_DAYS
+  const left = AUTO_RECEIPT_DAYS - Math.floor((Date.now() - shippedAt) / (24 * 3600 * 1000))
+  return Math.max(left, 0)
+}
+
+async function handleAdminReceipt(row) {
+  try {
+    await ElMessageBox.confirm(
+      `确认订单 ${row.orderNo} 已妥投并完成交易吗？确认后不可撤销。`,
+      '确认收货',
+      { type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await adminConfirmReceipt(row.orderNo)
+    ElMessage.success('已确认收货，订单完成')
+    await Promise.all([loadAdminOrders(), loadStats()])
+  } catch {
+    await loadAdminOrders()
   }
 }
 
@@ -968,9 +1046,13 @@ onMounted(() => {
                 <span class="muted">{{ row.payTypeName || '—' }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="物流单号" width="170">
+            <el-table-column label="物流" width="200">
               <template #default="{ row }">
-                <span class="muted">{{ row.trackingNo || '—' }}</span>
+                <template v-if="row.trackingNo">
+                  <div class="muted">{{ row.carrierName || '—' }}</div>
+                  <div class="logistics-no">{{ row.trackingNo }}</div>
+                </template>
+                <span v-else class="muted">—</span>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="190">
@@ -978,9 +1060,23 @@ onMounted(() => {
                 <el-button v-if="row.status === 1" link type="primary" @click="openShipDialog(row)">
                   发货
                 </el-button>
-                <el-button v-if="row.status === 2" link type="success" @click="handleOrderAction(row, 3, '完成')">
-                  完成
-                </el-button>
+                <template v-if="row.status === 2">
+                  <el-button
+                    v-if="receiptReady(row)"
+                    link
+                    type="success"
+                    @click="handleAdminReceipt(row)"
+                  >
+                    确认收货
+                  </el-button>
+                  <el-tooltip
+                    v-else
+                    :content="`发货满 ${AUTO_RECEIPT_DAYS} 天后可确认收货，还剩 ${receiptRemainDays(row)} 天`"
+                    placement="top"
+                  >
+                    <span class="muted-disabled">确认收货</span>
+                  </el-tooltip>
+                </template>
                 <el-button
                   v-if="row.status === 0 || row.status === 1"
                   link
@@ -1056,18 +1152,38 @@ onMounted(() => {
     </el-tabs>
 
     <!-- ============ 发货弹窗 ============ -->
-    <el-dialog v-model="shipDialog" title="订单发货" width="440px">
+    <el-dialog v-model="shipDialog" title="订单发货" width="480px">
       <el-form label-width="90px" @submit.prevent>
         <el-form-item label="订单号">
           <span class="muted">{{ shipForm.orderNo }}</span>
         </el-form-item>
-        <el-form-item label="物流单号" required>
-          <el-input
-            v-model="shipForm.trackingNo"
-            maxlength="64"
-            placeholder="请输入快递单号，例如 SF1234567890"
-            @keyup.enter="submitShip"
-          />
+        <el-form-item label="配送方" required>
+          <el-select
+            v-model="shipForm.carrier"
+            style="width: 100%"
+            @change="handleCarrierChange"
+          >
+            <el-option
+              v-for="item in CARRIERS"
+              :key="item.code"
+              :label="`${item.name}（${item.sample}）`"
+              :value="item.code"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="物流单号">
+          <div class="tracking-row">
+            <el-input
+              v-model="shipForm.trackingNo"
+              maxlength="64"
+              placeholder="留空则由后端自动生成"
+              @keyup.enter="submitShip"
+            />
+            <el-button @click="shipForm.trackingNo = generateTrackingNo(shipForm.carrier)">
+              重新生成
+            </el-button>
+          </div>
+          <div class="form-hint">单号按所选配送方的规则自动生成，也可以手动改写。</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -1343,6 +1459,25 @@ onMounted(() => {
 .metric-note-line strong {
   color: #303133;
   font-weight: 600;
+}
+
+/* ---------- 发货弹窗 ---------- */
+.tracking-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.logistics-no {
+  font-size: 12px;
+  color: #303133;
+}
+
+/* 未到期的「确认收货」：看起来像按钮但不可点 */
+.muted-disabled {
+  font-size: 14px;
+  color: #c0c4cc;
+  cursor: not-allowed;
 }
 
 .carousel-preview {
