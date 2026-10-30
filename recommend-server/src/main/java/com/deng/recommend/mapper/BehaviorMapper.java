@@ -1,6 +1,7 @@
 package com.deng.recommend.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.deng.recommend.dto.BehaviorHistoryRow;
 import com.deng.recommend.entity.Behavior;
 import com.deng.recommend.recommend.model.BehaviorRecord;
 import org.apache.ibatis.annotations.Mapper;
@@ -44,4 +45,52 @@ public interface BehaviorMapper extends BaseMapper<Behavior> {
             @Result(property = "occurredAt", column = "created_at")
     })
     List<BehaviorRecord> selectBehaviorRecords(@Param("since") LocalDateTime since, @Param("limit") int limit);
+
+    /**
+     * 按商品聚合查询某用户的行为足迹。
+     *
+     * <p><b>为什么要聚合</b>：同一商品会被多次浏览，直接按行为行分页会出现
+     * 同一个商品在列表里连排十几格。这里按 {@code product_id} 分组，
+     * 取该商品最后一次行为时间与累计次数，一个商品只占一行。
+     *
+     * <p><b>为什么要传 Types 列表</b>：「浏览过」要同时包含 VIEW 与 CLICK；
+     * 「买过」只有 PURCHASE。用 IN 而非等值判断，避免上层写两套 SQL。
+     *
+     * @param userId 用户 ID
+     * @param types  行为类型集合，不能为空
+     * @param offset 跳过行数
+     * @param limit  返回行数
+     * @return 聚合行列表，按最后行为时间倒序
+     */
+    @Select({
+            "<script>",
+            "SELECT product_id AS productId,",
+            "       MAX(created_at) AS lastTime,",
+            "       COUNT(*) AS times",
+            "FROM behavior",
+            "WHERE user_id = #{userId}",
+            "  AND behavior_type IN",
+            "  <foreach collection='types' item='type' open='(' separator=',' close=')'>#{type}</foreach>",
+            "GROUP BY product_id",
+            "ORDER BY lastTime DESC",
+            "LIMIT #{offset}, #{limit}",
+            "</script>"
+    })
+    List<BehaviorHistoryRow> selectHistory(@Param("userId") Long userId,
+                                           @Param("types") List<String> types,
+                                           @Param("offset") long offset,
+                                           @Param("limit") long limit);
+
+    /**
+     * 统计某用户行为足迹涉及的商品数（聚合后的总数，用于分页）。
+     */
+    @Select({
+            "<script>",
+            "SELECT COUNT(DISTINCT product_id) FROM behavior",
+            "WHERE user_id = #{userId}",
+            "  AND behavior_type IN",
+            "  <foreach collection='types' item='type' open='(' separator=',' close=')'>#{type}</foreach>",
+            "</script>"
+    })
+    long countHistory(@Param("userId") Long userId, @Param("types") List<String> types);
 }
