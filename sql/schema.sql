@@ -175,3 +175,47 @@ CREATE TABLE `review` (
   UNIQUE KEY `uk_user_product` (`user_id`, `product_id`),
   KEY `idx_product_id` (`product_id`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '商品评价表';
+
+-- ----------------------------
+-- 9. 商品收藏表
+--    收藏是轻量关系，取消收藏直接物理删除，不采用逻辑删除
+-- ----------------------------
+DROP TABLE IF EXISTS `favorite`;
+CREATE TABLE `favorite` (
+  `id`          BIGINT   NOT NULL AUTO_INCREMENT COMMENT '收藏ID',
+  `user_id`     BIGINT   NOT NULL                COMMENT '用户ID',
+  `product_id`  BIGINT   NOT NULL                COMMENT '商品ID',
+  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '收藏时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_product` (`user_id`, `product_id`),
+  KEY `idx_user_time` (`user_id`, `create_time`),
+  KEY `idx_product_id` (`product_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '商品收藏表';
+
+-- ----------------------------
+-- 10. 首页轮播图表
+--     bg_color 存 CSS 渐变色值，避免依赖外部图片资源
+-- ----------------------------
+DROP TABLE IF EXISTS `carousel`;
+CREATE TABLE `carousel` (
+  `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '轮播图ID',
+  `title`       VARCHAR(100) NOT NULL                COMMENT '主标题',
+  `subtitle`    VARCHAR(255) DEFAULT NULL            COMMENT '副标题',
+  `image_url`   VARCHAR(255) DEFAULT NULL            COMMENT '背景图URL，为空时用bg_color渐变',
+  `bg_color`    VARCHAR(255) NOT NULL DEFAULT 'linear-gradient(135deg,#ff6a00,#ee0979)' COMMENT 'CSS渐变色值',
+  `link_url`    VARCHAR(255) DEFAULT NULL            COMMENT '点击跳转路径',
+  `sort_order`  INT          NOT NULL DEFAULT 0      COMMENT '排序值，越小越靠前',
+  `status`      TINYINT      NOT NULL DEFAULT 1      COMMENT '状态：1-启用，0-停用',
+  `is_deleted`  TINYINT      NOT NULL DEFAULT 0      COMMENT '逻辑删除',
+  `create_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_status_sort` (`status`, `sort_order`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '首页轮播图表';
+
+-- 轮播图初始数据
+INSERT INTO `carousel` (`title`, `subtitle`, `bg_color`, `link_url`, `sort_order`, `status`) VALUES
+('个性化推荐引擎', '基于 UserCF 与 ItemCF 双引擎，为你挑选真正感兴趣的商品', 'linear-gradient(135deg,#ff6a00,#ee0979)', '/products', 1, 1),
+('协同过滤 · 猜你喜欢', '看看和你兴趣相似的人都在买什么', 'linear-gradient(135deg,#1d976c,#93f9b9)', '/products', 2, 1),
+('热门榜单', '近 30 天全站加权行为最高的商品', 'linear-gradient(135deg,#2193b0,#6dd5ed)', '/products?sort=sales', 3, 1),
+('新品上架', '刚刚加入的商品，抢先体验', 'linear-gradient(135deg,#8e2de2,#4a00e0)', '/products', 4, 1);
