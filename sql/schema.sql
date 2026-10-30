@@ -9,6 +9,13 @@
 --   2. 所有表必含 create_time / update_time 审计字段
 --   3. 金额统一 DECIMAL(10,2)，禁止 FLOAT/DOUBLE
 --   4. 订单表命名为 orders，避开 MySQL 关键字 order
+--
+-- ⚠️ 执行方式（必须带 --default-character-set=utf8mb4）
+--   mysql --default-character-set=utf8mb4 -u root -p < sql/schema.sql
+--
+--   原因：Windows 下 mysql 客户端默认按 GBK 解析脚本文件，而本文件是 UTF-8。
+--   不指定字符集时，表名/字段名能建对，但所有中文 COMMENT 会变成乱码，
+--   典型表现是「杞?挱鍥綢D」这类字符（即 UTF-8 字节被当 GBK 解码）。
 -- =============================================================
 
 CREATE DATABASE IF NOT EXISTS recommend_db

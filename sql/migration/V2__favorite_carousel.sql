@@ -1,7 +1,16 @@
 -- =============================================================
 -- V2 增量迁移：新增收藏表与轮播图表
 -- 适用：已按 schema.sql v1 初始化过的数据库
--- 执行：mysql -u root -p recommend_db < sql/migration/V2__favorite_carousel.sql
+--
+-- ⚠️ 执行方式（必须带 --default-character-set=utf8mb4）
+--   mysql --default-character-set=utf8mb4 -u root -p recommend_db \
+--     < sql/migration/V2__favorite_carousel.sql
+--
+--   不加这个参数，中文 COMMENT 会变成「鏀惰棌ID」这类乱码。
+--
+-- 如果已经乱码了：直接 DROP 掉这两张表再重跑本脚本即可
+--   （favorite 为空表、carousel 只有本脚本内置的种子数据，重跑无损）
+--   DROP TABLE IF EXISTS favorite, carousel;
 -- =============================================================
 
 USE recommend_db;
