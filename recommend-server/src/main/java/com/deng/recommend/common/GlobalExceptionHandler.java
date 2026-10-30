@@ -63,6 +63,19 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 非法参数值（如枚举越界）。
+     *
+     * <p>枚举的 {@code of()} 方法用 IllegalArgumentException 表达「值不认识」，
+     * 如果落到兜底分支会被报成 9999 系统错误，误导排查方向。
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    @ResponseStatus(HttpStatus.OK)
+    public Result<Void> handleIllegalArgument(IllegalArgumentException e) {
+        log.warn("非法参数: {}", e.getMessage());
+        return Result.fail(ResultCode.PARAM_ERROR.getCode(), e.getMessage());
+    }
+
+    /**
      * 请求的路径没有任何 Controller 映射。
      *
      * <p>必须单独处理：否则会落到下面的 {@code Exception} 兜底分支，
