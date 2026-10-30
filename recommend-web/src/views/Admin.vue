@@ -405,26 +405,29 @@ async function loadAdminOrders() {
   }
 }
 
-function orderStatusLabel(status) {
-  return ORDER_STATUS.find((item) => item.value === status)?.label || '未知'
-}
-
-async function handleOrderStatusChange(row) {
+/**
+ * 订单状态流转。
+ *
+ * 不做「下拉任选状态」了：那样可以把待支付直接改成已完成，
+ * 或者把已发货倒回待支付。现在只暴露当前状态允许的下一步按钮，
+ * 服务端也会按状态机再校验一次。
+ */
+async function handleOrderAction(row, targetStatus, actionName) {
   try {
     await ElMessageBox.confirm(
-      `确定把订单 ${row.orderNo} 改为「${orderStatusLabel(row.status)}」吗？`,
+      `确定将订单 ${row.orderNo} 标记为「${actionName}」吗？`,
       '提示',
       { type: 'warning' }
     )
   } catch {
-    await loadAdminOrders()
     return
   }
   try {
-    await updateOrderStatus(row.orderNo, row.status)
-    ElMessage.success('订单状态已更新')
+    await updateOrderStatus(row.orderNo, targetStatus)
+    ElMessage.success(`订单已${actionName}`)
     await Promise.all([loadAdminOrders(), loadStats()])
   } catch {
+    // 失败时重新拉取，保证界面与真实状态一致
     await loadAdminOrders()
   }
 }
@@ -852,11 +855,28 @@ onMounted(() => {
                 <el-tag :type="statusTag(row.status)">{{ row.statusName }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="变更状态" width="150">
+            <el-table-column label="支付方式" width="110">
               <template #default="{ row }">
-                <el-select v-model="row.status" size="small" @change="handleOrderStatusChange(row)">
-                  <el-option v-for="item in ORDER_STATUS" :key="item.value" :label="item.label" :value="item.value" />
-                </el-select>
+                <span class="muted">{{ row.payTypeName || '—' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="190">
+              <template #default="{ row }">
+                <el-button v-if="row.status === 1" link type="primary" @click="handleOrderAction(row, 2, '发货')">
+                  发货
+                </el-button>
+                <el-button v-if="row.status === 2" link type="success" @click="handleOrderAction(row, 3, '完成')">
+                  完成
+                </el-button>
+                <el-button
+                  v-if="row.status === 0 || row.status === 1"
+                  link
+                  type="danger"
+                  @click="handleOrderAction(row, 4, '取消')"
+                >
+                  取消
+                </el-button>
+                <span v-if="row.status >= 3" class="muted">已结束</span>
               </template>
             </el-table-column>
             <el-table-column label="下单时间" width="170">

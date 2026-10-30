@@ -152,6 +152,12 @@ onMounted(loadOrders)
             <el-descriptions-item label="金额">
               <span class="price">￥{{ detail.totalAmount }}</span>
             </el-descriptions-item>
+            <el-descriptions-item label="支付方式">
+              {{ detail.payTypeName || '—' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="支付时间">
+              {{ detail.paidTime ? formatTime(detail.paidTime) : '未支付' }}
+            </el-descriptions-item>
             <el-descriptions-item label="收货人">{{ detail.receiverName || '-' }}</el-descriptions-item>
             <el-descriptions-item label="联系电话">{{ detail.receiverPhone || '-' }}</el-descriptions-item>
             <el-descriptions-item label="收货地址" :span="2">
