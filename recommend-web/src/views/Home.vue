@@ -253,30 +253,36 @@ onBeforeUnmount(() => {
 
             <span class="cat-text">
               <span class="cat-name">{{ category.name }}</span>
-              <span v-for="child in category.children || []" :key="child.id" class="cat-sub">
+              <!-- 行内只平铺前 3 个二级，和淘宝一样保持单行不超过 4 项 -->
+              <span v-for="child in (category.children || []).slice(0, 3)" :key="child.id" class="cat-sub">
                 / {{ child.name }}
               </span>
             </span>
 
             <span class="cat-arrow">›</span>
 
-            <!-- 悬停展开的二级面板 -->
+            <!-- 悬停展开：按二级分组，组内平铺三级细分类 -->
             <div
               v-if="activeCategoryId === category.id && (category.children || []).length"
               class="cat-flyout"
               @click.stop
             >
               <div class="flyout-head">{{ category.name }}</div>
-              <div class="flyout-links">
-                <span
-                  v-for="child in category.children"
-                  :key="child.id"
-                  class="flyout-link"
-                  @click="goCategory(child)"
-                >
-                  {{ child.name }}
-                </span>
+
+              <div v-for="child in category.children" :key="child.id" class="flyout-group">
+                <div class="group-name" @click="goCategory(child)">{{ child.name }}</div>
+                <div class="group-items">
+                  <span
+                    v-for="third in child.children || []"
+                    :key="third.id"
+                    class="group-item"
+                    @click="goCategory(third)"
+                  >
+                    {{ third.name }}
+                  </span>
+                </div>
               </div>
+
               <div class="flyout-foot" @click="goCategory(category)">查看全部 ›</div>
             </div>
           </li>
@@ -502,15 +508,15 @@ onBeforeUnmount(() => {
   line-height: 1;
 }
 
-/* 二级悬浮面板：左侧橙色竖线 + 白底，贴合淘宝的展开面板观感 */
+/* 二级悬浮面板：左侧橙色竖线 + 白底，按二级分组的细分类网格 */
 .cat-flyout {
   position: absolute;
   left: 100%;
   top: -1px;
   z-index: 30;
-  min-width: 300px;
+  width: 520px;
   min-height: 100%;
-  padding: 12px 16px 14px;
+  padding: 12px 16px 12px;
   background: #fff;
   border: 1px solid #f0f0f0;
   border-left: 2px solid #ff5000;
@@ -522,31 +528,60 @@ onBeforeUnmount(() => {
   font-size: 13px;
   font-weight: 600;
   color: #333;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
-/* 子类目横向排布并自动换行，接近淘宝面板里一行排多个词的样子 */
-.flyout-links {
+/* 一组 = 一个二级类目 + 它下面的三级 */
+.flyout-group {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px 18px;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 7px 0;
+  border-top: 1px dashed #f2f3f5;
 }
 
-.flyout-link {
+.flyout-group:first-of-type {
+  border-top: none;
+}
+
+.group-name {
+  flex: 0 0 92px;
   font-size: 12.5px;
-  color: #666;
+  font-weight: 600;
+  color: #333;
   cursor: pointer;
+  line-height: 1.7;
   transition: color 0.15s;
 }
 
-.flyout-link:hover {
+.group-name:hover {
+  color: #ff5000;
+}
+
+.group-items {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.group-item {
+  font-size: 12.5px;
+  color: #666;
+  cursor: pointer;
+  line-height: 1.7;
+  transition: color 0.15s;
+}
+
+.group-item:hover {
   color: #ff5000;
 }
 
 .flyout-foot {
-  margin-top: 12px;
+  margin-top: 6px;
   padding-top: 8px;
-  border-top: 1px dashed #f0f0f0;
+  border-top: 1px solid #f5f5f5;
   font-size: 12px;
   color: #ff5000;
   cursor: pointer;

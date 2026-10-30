@@ -77,7 +77,7 @@ onMounted(() => {
         <template v-if="userStore.isLoggedIn">
           <!-- 头像 + 昵称整体可点，进入个人中心 -->
           <div class="user-chip" @click="router.push('/profile')">
-            <el-avatar :size="26" :src="userStore.userInfo?.avatar || undefined" class="chip-avatar">
+            <el-avatar :size="36" :src="userStore.userInfo?.avatar || undefined" class="chip-avatar">
               {{ avatarText }}
             </el-avatar>
             <span class="muted">{{ userStore.userInfo?.nickname || userStore.userInfo?.username }}</span>
@@ -167,9 +167,9 @@ onMounted(() => {
 .user-chip {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 8px 3px 3px;
-  border-radius: 14px;
+  gap: 8px;
+  padding: 3px 10px 3px 3px;
+  border-radius: 20px;
   cursor: pointer;
   transition: background 0.15s;
 }
@@ -181,8 +181,9 @@ onMounted(() => {
 .chip-avatar {
   background: #ff5000;
   color: #fff;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 600;
   flex: 0 0 auto;
+  border: 1px solid #ffe0d0;
 }
 </style>

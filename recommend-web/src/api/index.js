@@ -12,6 +12,20 @@ export const getUserStats = () => http.get('/user/stats')
 export const getUserHistory = (type = 'VIEW', pageNum = 1, pageSize = 12) =>
   http.get('/user/history', { params: { type, pageNum, pageSize } })
 
+/** 上传头像，返回可访问的图片地址（不会自动写入资料，需再调用保存） */
+export const uploadAvatar = (file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return http.post('/user/avatar', formData)
+}
+
+/* ===== 收货地址簿 ===== */
+export const getAddresses = () => http.get('/user/addresses')
+export const createAddress = (data) => http.post('/user/addresses', data)
+export const updateAddress = (id, data) => http.put(`/user/addresses/${id}`, data)
+export const deleteAddress = (id) => http.delete(`/user/addresses/${id}`)
+export const setDefaultAddress = (id) => http.put(`/user/addresses/${id}/default`)
+
 /* ===== 商品与类目 ===== */
 export const getProducts = (params) => http.get('/products', { params })
 export const getProduct = (id) => http.get(`/products/${id}`)
