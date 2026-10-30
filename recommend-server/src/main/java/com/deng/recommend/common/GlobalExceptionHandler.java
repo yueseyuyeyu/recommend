@@ -9,6 +9,8 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.stream.Collectors;
 
@@ -58,6 +60,27 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.OK)
     public Result<Void> handleNotReadableException(HttpMessageNotReadableException e) {
         return Result.fail(ResultCode.PARAM_ERROR.getCode(), "请求体格式错误");
+    }
+
+    /**
+     * 请求的路径没有任何 Controller 映射。
+     *
+     * <p>必须单独处理：否则会落到下面的 {@code Exception} 兜底分支，
+     * 把「接口不存在」报成「系统内部错误 9999」，排查时会被误导
+     * （典型场景是前端已更新、后端还跑着旧版本）。
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    @ResponseStatus(HttpStatus.OK)
+    public Result<Void> handleNoResourceFound(NoResourceFoundException e) {
+        log.warn("接口不存在: /{}", e.getResourcePath());
+        return Result.fail(ResultCode.NOT_FOUND.getCode(), "接口不存在，请确认后端已重启并包含最新代码");
+    }
+
+    @ExceptionHandler(NoHandlerFoundException.class)
+    @ResponseStatus(HttpStatus.OK)
+    public Result<Void> handleNoHandlerFound(NoHandlerFoundException e) {
+        log.warn("接口不存在: {} {}", e.getHttpMethod(), e.getRequestURL());
+        return Result.fail(ResultCode.NOT_FOUND.getCode(), "接口不存在，请确认后端已重启并包含最新代码");
     }
 
     /**
