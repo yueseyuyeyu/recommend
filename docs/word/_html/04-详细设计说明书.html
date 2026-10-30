@@ -1,0 +1,1816 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>04-详细设计说明书</title><style>
+body { font-family: 'Microsoft YaHei', 'SimSun', sans-serif; font-size: 11pt;
+       line-height: 1.6; color: #24292f; margin: 2.5em; }
+h1 { font-size: 20pt; border-bottom: 2px solid #d0d7de; padding-bottom: 6pt; }
+h2 { font-size: 15pt; border-bottom: 1px solid #d8dee4; padding-bottom: 4pt; margin-top: 22pt; }
+h3 { font-size: 13pt; margin-top: 16pt; }
+h4, h5, h6 { font-size: 11.5pt; }
+table { border-collapse: collapse; width: 100%; margin: 8pt 0; }
+th, td { border: 1px solid #b6bec8; padding: 4pt 7pt; font-size: 10pt;
+         vertical-align: top; text-align: left; }
+th { background: #eef1f4; font-weight: bold; }
+code { font-family: Consolas, 'Courier New', monospace; background: #f2f3f5;
+       padding: 0 3px; font-size: 9.5pt; }
+pre { background: #f6f8fa; border: 1px solid #d8dee4; padding: 8pt;
+      font-size: 9.5pt; white-space: pre-wrap; }
+pre code { background: none; padding: 0; }
+blockquote { border-left: 3px solid #ff7a45; background: #fff8f5;
+             margin: 8pt 0; padding: 4pt 10pt; color: #555; }
+li { margin: 2pt 0; }
+hr { border: none; border-top: 1px solid #d0d7de; margin: 14pt 0; }
+a { color: #0969da; text-decoration: none; }
+</style></head><body><h1>04-详细设计说明书</h1><h1>详细设计说明书</h1>
+<table>
+<tr>
+<th>文档信息</th>
+<th>内容</th>
+</tr>
+<tr>
+<td>项目名称</td>
+<td>商品推荐系统（Product Recommendation System）</td>
+</tr>
+<tr>
+<td>文档版本</td>
+<td>v1.0</td>
+</tr>
+<tr>
+<td>文档类型</td>
+<td>详细设计说明书</td>
+</tr>
+<tr>
+<td>撰写日期</td>
+<td>2026-10-28</td>
+</tr>
+</table>
+<hr/>
+<h2>1. 引言</h2>
+<h3>1.1 编写目的</h3>
+<p>本文档是编码阶段的<b>施工图</b>：把概要设计中的模块、算法、接口细化到 「类 → 方法签名 → 数据结构 → 处理流程 → 边界条件」的粒度， 使得编码时不需要再做设计决策，只需要按本文实现。</p>
+<p>与《概要设计说明书》的关系：概要设计回答「有哪些模块」， 本文回答「每个类怎么写、方法叫什么、参数是什么、异常怎么抛」。</p>
+<h3>1.2 参考文档</h3>
+<ul>
+<li>《需求规格说明书》`docs/markdown/02-需求规格说明书.md`</li>
+<li>《概要设计说明书》`docs/markdown/03-概要设计说明书.md`</li>
+<li>《数据库设计说明书》`docs/markdown/05-数据库设计说明书.md`</li>
+<li>《开发上手指南》`docs/markdown/10-开发上手指南.md`</li>
+<li>建表脚本 `sql/schema.sql`</li>
+<li>参考实现存档 `skeleton-v1`（Git tag，仅供对照，不要直接抄）</li>
+</ul>
+<h3>1.3 与概要设计的差异说明</h3>
+<p>概要设计成文在前，编码前做了三处收敛，本文以本文为准：</p>
+<table>
+<tr>
+<th>编号</th>
+<th>概要设计</th>
+<th>详细设计</th>
+<th>理由</th>
+</tr>
+<tr>
+<td>C1</td>
+<td>`similarity/Similarity.java` 相似度接口</td>
+<td>只保留 `CosineSimilarity` 静态工具类</td>
+<td>只有一个实现，接口是空抽象；将来要换皮尔森再抽接口不迟</td>
+</tr>
+<tr>
+<td>C2</td>
+<td>推荐结果缓存（30 分钟）</td>
+<td>首版不做缓存</td>
+<td>单机学习项目行为量小，一次矩阵构建毫秒级；先保证正确性，缓存留作数据量上来后的优化</td>
+</tr>
+<tr>
+<td>C3</td>
+<td>行为上报异步写入</td>
+<td>首版同步写入</td>
+<td>异步会引入线程池配置、失败不可观测、单测难写；数据量小无收益</td>
+</tr>
+</table>
+<blockquote><p>这三条不是「偷懒」，是<b>先做对、再做快</b>。任何一条要改回来，都必须同步更新本文并补测试。</p></blockquote>
+<hr/>
+<h2>2. 设计总览</h2>
+<h3>2.1 分层与调用规则</h3>
+<pre><code>Controller ──▶ Service ──▶ Mapper ──▶ MySQL
+                 │
+                 ├──▶ RecommendEngine ──▶ 四个 Strategy （纯函数，不碰 DB）
+                 └──▶ BehaviorService.buildMatrix() 提供算法输入</code></pre>
+<p>强制规则（违反即代码评审不通过）：</p>
+<ol>
+<li>Controller 只做「收参数 → 调 Service → 包 Result」，不写 if/else 业务分支。</li>
+<li>Service 不做 HTTP 相关处理（不碰 `HttpServletRequest`），当前用户 ID 用 `SecurityUtils` 取。</li>
+<li>`recommend` 包<b>不注入 Mapper</b>，输入一律是 `UserItemMatrix`，保证纯函数、可单测。</li>
+<li>算法层的输出只有 `(itemId, score, reason)`，商品详情查询由 `RecommendService` 负责。</li>
+</ol>
+<h3>2.2 包结构</h3>
+<pre><code>com.deng.recommend
+├── RecommendApplication.java            启动类（@MapperScan）
+├── common/        5 个：Result、ResultCode、BusinessException、GlobalExceptionHandler、PageResult
+├── config/        6 个：SecurityConfig、CorsConfig、MybatisPlusConfig、OpenApiConfig、
+│                        RecommendProperties、SecurityUtils
+├── security/      3 个：UserPrincipal、JwtTokenProvider、JwtAuthenticationFilter
+├── controller/    9 个：Auth/Product/Category/Behavior/Recommend/Cart/Order/Review + admin/Admin
+├── service/       9 个接口 + impl/ 9 个实现
+├── recommend/     6 个策略/引擎 + similarity/1 + model/4 + evaluator/1
+├── mapper/        8 个
+├── entity/        8 个 + enums/3
+├── dto/           8 个
+├── vo/            8 个
+└── tool/          1 个：SeedDataGenerator（固定种子生成演示数据）</code></pre>
+<h3>2.3 全局编码约定</h3>
+<table>
+<tr>
+<th>约定</th>
+<th>规则</th>
+</tr>
+<tr>
+<td>命名</td>
+<td>类大驼峰；方法小驼峰；常量全大写；表字段小写下划线</td>
+</tr>
+<tr>
+<td>时间</td>
+<td>一律 `LocalDateTime`；JSON 输出格式 `yyyy-MM-dd HH:mm:ss`</td>
+</tr>
+<tr>
+<td>金额</td>
+<td>一律 `BigDecimal`，禁止 `double/float`</td>
+</tr>
+<tr>
+<td>空值</td>
+<td>集合方法返回空集合而不是 `null`；算法层必须能处理 `null` 入参</td>
+</tr>
+<tr>
+<td>日志</td>
+<td>`@Slf4j`，异常用 `log.error("...", e)`；禁止 `printStackTrace()`</td>
+</tr>
+<tr>
+<td>事务</td>
+<td>只加在 Service 的写方法上，`@Transactional(rollbackFor = Exception.class)`</td>
+</tr>
+<tr>
+<td>注入</td>
+<td>只用构造器注入（`@RequiredArgsConstructor` + `final` 字段），禁止字段 `@Autowired`</td>
+</tr>
+<tr>
+<td>校验</td>
+<td>Jakarta Validation 注解写在 DTO 上，不写在 Entity 上</td>
+</tr>
+<tr>
+<td>注释</td>
+<td>只解释「为什么」，不复述「是什么」；每个类顶部一段职责说明</td>
+</tr>
+</table>
+<hr/>
+<h2>3. 通用层设计（`common`）</h2>
+<h3>3.1 `Result&lt;T&gt;` 统一响应体</h3>
+<pre><code>public class Result&lt;T&gt; {
+    private int code;
+    private String message;
+    private T data;
+    private long timestamp;      // System.currentTimeMillis()
+
+    public static &lt;T&gt; Result&lt;T&gt; success();
+    public static &lt;T&gt; Result&lt;T&gt; success(T data);
+    public static &lt;T&gt; Result&lt;T&gt; fail(ResultCode resultCode);
+    public static &lt;T&gt; Result&lt;T&gt; fail(int code, String message);
+}</code></pre>
+<p>约定：</p>
+<ul>
+<li>`code = 0` 成功，非 0 失败；<b>HTTP 状态码统一 200</b>，前端拦截器只看 `code`。</li>
+<li>`timestamp` 每次创建时写入，便于排查时序问题。</li>
+</ul>
+<h3>3.2 `ResultCode` 错误码枚举</h3>
+<pre><code>public enum ResultCode {
+    SUCCESS(0, &quot;success&quot;),
+    PARAM_ERROR(1001, &quot;参数校验失败&quot;),
+    UNAUTHORIZED(1002, &quot;未登录或登录已过期&quot;),
+    FORBIDDEN(1003, &quot;无权限访问&quot;),
+    NOT_FOUND(1004, &quot;资源不存在&quot;),
+    USERNAME_EXISTS(2001, &quot;用户名已被注册&quot;),
+    USERNAME_OR_PASSWORD_ERROR(2002, &quot;用户名或密码错误&quot;),
+    USER_DISABLED(2003, &quot;账号已被禁用&quot;),
+    PASSWORD_MISMATCH(2004, &quot;两次输入的密码不一致&quot;),
+    OLD_PASSWORD_ERROR(2005, &quot;原密码错误&quot;),
+    PRODUCT_NOT_FOUND(3001, &quot;商品不存在&quot;),
+    PRODUCT_OFF_SHELF(3002, &quot;商品已下架&quot;),
+    CATEGORY_NOT_FOUND(3003, &quot;类目不存在&quot;),
+    STOCK_NOT_ENOUGH(4001, &quot;库存不足&quot;),
+    CART_EMPTY(4002, &quot;购物车为空&quot;),
+    ORDER_NOT_FOUND(4003, &quot;订单不存在&quot;),
+    ORDER_NOT_CANCELLABLE(4004, &quot;当前状态不允许取消订单&quot;),
+    CREATE_ORDER_FAILED(4005, &quot;下单失败，请重试&quot;),
+    ORDER_STATUS_ILLEGAL(4006, &quot;当前订单状态不允许该操作&quot;),
+    REVIEW_EXISTS(4007, &quot;该商品已评价过&quot;),
+    RECOMMEND_DEGRADED(5001, &quot;推荐服务已降级为热门推荐&quot;),
+    SYSTEM_ERROR(9999, &quot;系统内部错误&quot;);
+
+    private final int code;
+    private final String message;
+    // getter
+}</code></pre>
+<blockquote><p><b>为什么把错误码集中成枚举</b>：参考项目到处 `throw new RuntimeException("xxx")`， 前端只能靠字符串匹配，改一个字就断。错误码是接口契约的一部分。</p></blockquote>
+<h3>3.3 `BusinessException`</h3>
+<pre><code>public class BusinessException extends RuntimeException {
+    private final int code;
+
+    public BusinessException(ResultCode resultCode);
+    public BusinessException(ResultCode resultCode, String message);  // 覆盖默认提示
+    public int getCode();
+}</code></pre>
+<ul>
+<li>不填充堆栈信息可省性能，但本项目为学习项目，保留默认堆栈便于排查。</li>
+<li>业务可预期错误一律抛它，<b>不要</b>抛 `RuntimeException`。</li>
+</ul>
+<h3>3.4 `GlobalExceptionHandler`（`@RestControllerAdvice`）</h3>
+<table>
+<tr>
+<th>捕获异常</th>
+<th>返回 code</th>
+<th>日志级别</th>
+<th>说明</th>
+</tr>
+<tr>
+<td>`BusinessException`</td>
+<td>异常自带</td>
+<td>warn</td>
+<td>业务可预期，不打堆栈</td>
+</tr>
+<tr>
+<td>`MethodArgumentNotValidException`</td>
+<td>1001</td>
+<td>warn</td>
+<td>取第一个字段错误信息返回</td>
+</tr>
+<tr>
+<td>`BindException`</td>
+<td>1001</td>
+<td>warn</td>
+<td>GET 查询参数绑定失败</td>
+</tr>
+<tr>
+<td>`ConstraintViolationException`</td>
+<td>1001</td>
+<td>warn</td>
+<td>`@RequestParam` 上的校验</td>
+</tr>
+<tr>
+<td>`HttpRequestMethodNotSupportedException`</td>
+<td>1001</td>
+<td>warn</td>
+<td>方法不允许</td>
+</tr>
+<tr>
+<td>`AccessDeniedException`</td>
+<td>1003</td>
+<td>warn</td>
+<td>权限不足</td>
+</tr>
+<tr>
+<td>`AuthenticationException`</td>
+<td>1002</td>
+<td>warn</td>
+<td>未认证</td>
+</tr>
+<tr>
+<td>`Exception`</td>
+<td>9999</td>
+<td><b>error</b></td>
+<td>兜底，<b>绝不把堆栈返回前端</b></td>
+</tr>
+</table>
+<h3>3.5 `PageResult&lt;T&gt;` 分页响应</h3>
+<pre><code>public class PageResult&lt;T&gt; {
+    private long total;
+    private int pageNum;
+    private int pageSize;
+    private long pages;
+    private List&lt;T&gt; records;
+
+    public static &lt;T&gt; PageResult&lt;T&gt; of(IPage&lt;T&gt; page);
+    public static &lt;T&gt; PageResult&lt;T&gt; of(IPage&lt;?&gt; page, List&lt;T&gt; records); // 需要转换 VO 时用
+}</code></pre>
+<blockquote><p>第二个工厂方法很关键：`IPage&lt;Product&gt;` 要转成 `IPage&lt;ProductVO&gt;`， 直接改泛型是不行的，用 `of(page, voList)` 保留分页元信息。</p></blockquote>
+<hr/>
+<h2>4. 实体层与枚举（`entity`）</h2>
+<h3>4.1 设计决策：枚举只存在于业务层</h3>
+<p>数据库里 `user.role`、`orders.status` 是 `TINYINT`，`behavior.behavior_type` 是 `VARCHAR`。 实体类<b>直接使用 `Integer` / `String` 存储编码</b>，在 Service 层用 `UserRole.of(code)` 转枚举。</p>
+<blockquote><p><b>为什么不用 MyBatis-Plus 的 `@EnumValue` / `IEnum`</b>： 它会把「数据库编码 ↔ 枚举」的映射藏进框架，初学时出问题很难定位； 显式在 Service 转一次，代码可读、可测，且 Entity 与表字段一一对应。</p></blockquote>
+<h3>4.2 三个枚举</h3>
+<table>
+<tr>
+<th>枚举</th>
+<th>常量（编码, 含义）</th>
+<th>额外方法</th>
+</tr>
+<tr>
+<td>`UserRole`</td>
+<td>`USER(1,"普通用户")`、`ADMIN(2,"管理员")`</td>
+<td>`of(Integer code)` 未知值返回 `USER`</td>
+</tr>
+<tr>
+<td>`BehaviorType`</td>
+<td>`VIEW(1.0)`、`CLICK(2.0)`、`CART(3.0)`、`PURCHASE(5.0)`、`RATE(4.0)`（编码为字符串名）</td>
+<td>`of(String code)` 未知值抛 `BusinessException(PARAM_ERROR)`；`getWeight()`</td>
+</tr>
+<tr>
+<td>`OrderStatus`</td>
+<td>`PENDING(0)`、`PAID(1)`、`SHIPPED(2)`、`COMPLETED(3)`、`CANCELLED(4)`</td>
+<td>`of(Integer)`、`cancellable()`（仅 PENDING 为 true）</td>
+</tr>
+</table>
+<p>`BehaviorType` 的权重是<b>推荐算法的核心输入</b>，必须固定：</p>
+<pre><code>VIEW(     &quot;VIEW&quot;,     1.0),   // 进入详情页
+CLICK(    &quot;CLICK&quot;,    2.0),   // 点击推荐位/列表
+CART(     &quot;CART&quot;,     3.0),   // 加购
+PURCHASE( &quot;PURCHASE&quot;, 5.0),   // 购买
+RATE(     &quot;RATE&quot;,     4.0);   // 评分</code></pre>
+<blockquote><p>权重不能随机：参考项目用 `Math.random()` 伪造强度，导致同一份数据跑两次结果不同。 固定权重 + 确定性排序 = 可复现，这是能写单测的前提。</p></blockquote>
+<h3>4.3 实体字段与映射</h3>
+<p>通用注解：`@Data`、`@TableName("表名")`、主键 `@TableId(type = IdType.AUTO)`。</p>
+<table>
+<tr>
+<th>实体</th>
+<th>表</th>
+<th>字段（Java 类型）</th>
+<th>特殊注解</th>
+</tr>
+<tr>
+<td>`User`</td>
+<td>`user`</td>
+<td>id Long、username String、passwordHash String、nickname String、email String、avatar String、role Integer、status Integer、lastLoginTime LocalDateTime、isDeleted Integer、createTime LocalDateTime、updateTime LocalDateTime</td>
+<td>`isDeleted` 加 `@TableLogic`；两个时间加 `@TableField(fill = ...)`</td>
+</tr>
+<tr>
+<td>`Category`</td>
+<td>`category`</td>
+<td>id、name、parentId Long、sortOrder Integer、isDeleted、createTime、updateTime</td>
+<td>同上</td>
+</tr>
+<tr>
+<td>`Product`</td>
+<td>`product`</td>
+<td>id、categoryId Long、name、subtitle、mainImage、price BigDecimal、originalPrice BigDecimal、stock Integer、sales Integer、status Integer、description String、isDeleted、createTime、updateTime</td>
+<td>金额 `BigDecimal`，库存 `Integer`</td>
+</tr>
+<tr>
+<td>`Behavior`</td>
+<td>`behavior`</td>
+<td>id、userId Long、productId Long、behaviorType String、weight BigDecimal、rating Integer、createdAt LocalDateTime</td>
+<td>`createdAt` 列名 `created_at`，不加自动填充（由业务写入）</td>
+</tr>
+<tr>
+<td>`Cart`</td>
+<td>`cart`</td>
+<td>id、userId、productId、quantity Integer、checked Integer、createTime、updateTime</td>
+<td>`checked` 用 1/0 而非 Boolean，与表一致</td>
+</tr>
+<tr>
+<td>`Order`</td>
+<td>`orders`</td>
+<td>id、orderNo String、userId、totalAmount BigDecimal、status Integer、receiverName、receiverPhone、receiverAddr、paidTime、isDeleted、createTime、updateTime</td>
+<td>`@TableName("orders")`，<b>避开关键字 order</b></td>
+</tr>
+<tr>
+<td>`OrderItem`</td>
+<td>`order_item`</td>
+<td>id、orderNo、productId、productName、price BigDecimal、quantity Integer、subtotal BigDecimal、createTime</td>
+<td>商品名/价格是<b>下单快照</b>，不随商品改价变化</td>
+</tr>
+<tr>
+<td>`Review`</td>
+<td>`review`</td>
+<td>id、userId、productId、orderNo、rating Integer、content、isDeleted、createTime、updateTime</td>
+<td>唯一键 `(user_id, product_id)`</td>
+</tr>
+</table>
+<p>字段填充注解：</p>
+<pre><code>@TableField(fill = FieldFill.INSERT)        private LocalDateTime createTime;
+@TableField(fill = FieldFill.INSERT_UPDATE) private LocalDateTime updateTime;
+@TableLogic                                  private Integer isDeleted;</code></pre>
+<p>`Behavior` 提供便捷方法（避免权重逻辑散落）：</p>
+<pre><code>public void applyType(BehaviorType type) {
+    this.behaviorType = type.getCode();
+    this.weight = BigDecimal.valueOf(type.getWeight());
+}</code></pre>
+<h3>4.4 启动类</h3>
+<pre><code>@SpringBootApplication
+@MapperScan(&quot;com.deng.recommend.mapper&quot;)
+public class RecommendApplication { }</code></pre>
+<hr/>
+<h2>5. 配置层与安全层（`config` / `security`）</h2>
+<h3>5.1 `RecommendProperties`（`@ConfigurationProperties(prefix = "recommend")`）</h3>
+<table>
+<tr>
+<th>配置项</th>
+<th>默认值</th>
+<th>含义</th>
+</tr>
+<tr>
+<td>`default-top-n`</td>
+<td>10</td>
+<td>未指定时的推荐数量</td>
+</tr>
+<tr>
+<td>`neighbor-k`</td>
+<td>20</td>
+<td>UserCF 邻居数 K</td>
+</tr>
+<tr>
+<td>`popularity-penalty`</td>
+<td>0.0</td>
+<td>ItemCF 热门惩罚指数 α，0 表示不惩罚</td>
+</tr>
+<tr>
+<td>`user-cf-weight`</td>
+<td>0.6</td>
+<td>混合推荐中 UserCF 权重</td>
+</tr>
+<tr>
+<td>`item-cf-weight`</td>
+<td>0.4</td>
+<td>混合推荐中 ItemCF 权重</td>
+</tr>
+<tr>
+<td>`hot-days`</td>
+<td>30</td>
+<td>热门统计时间窗口（天）</td>
+</tr>
+<tr>
+<td>`max-behavior-rows`</td>
+<td>200000</td>
+<td>单次构建矩阵最多加载的行为行数（保护内存）</td>
+</tr>
+</table>
+<blockquote><p><b>禁止</b>在算法类里出现 `3`、`0.6` 这类魔法数字；全部从这里取。</p></blockquote>
+<h3>5.2 `MybatisPlusConfig`</h3>
+<ol>
+<li>`MybatisPlusInterceptor` + `PaginationInnerInterceptor(DbType.MYSQL)`：分页必须走插件，禁止手工拼 `LIMIT`。</li>
+<li>`MetaObjectHandler`：insert 填 `createTime`、`updateTime`；update 填 `updateTime`。</li>
+</ol>
+<h3>5.3 `CorsConfig`</h3>
+<p>暴露 `CorsConfigurationSource` Bean：允许 `http://localhost:5173`，方法 `GET/POST/PUT/DELETE/OPTIONS`， 允许全部请求头，`allowCredentials(true)`，`maxAge(3600)`。</p>
+<blockquote><p>前端 Vite 默认 5173；`allowCredentials(true)` 时<b>不能用 `*`</b> 通配源，必须写具体源。</p></blockquote>
+<h3>5.4 安全设计</h3>
+<h4>5.4.1 `UserPrincipal`（implements `UserDetails`）</h4>
+<table>
+<tr>
+<th>字段/方法</th>
+<th>说明</th>
+</tr>
+<tr>
+<td>`userId`、`username`、`role`（String，`USER`/`ADMIN`）</td>
+<td>登录主体信息</td>
+</tr>
+<tr>
+<td>`password`</td>
+<td>仅在登录校验时持有 BCrypt 哈希；JWT 过滤器构造的实例为 `null`</td>
+</tr>
+<tr>
+<td>`getAuthorities()`</td>
+<td>返回 `ROLE_USER` / `ROLE_ADMIN`</td>
+</tr>
+<tr>
+<td>`isEnabled()`</td>
+<td>`status == 1`</td>
+</tr>
+</table>
+<h4>5.4.2 `JwtTokenProvider`</h4>
+<table>
+<tr>
+<th>方法</th>
+<th>说明</th>
+</tr>
+<tr>
+<td>`generateToken(Long userId, String username, String role)`</td>
+<td>subject=username，claim `uid`、`role`，HS256 签名</td>
+</tr>
+<tr>
+<td>`parseToken(String token)`</td>
+<td>解析并校验，失败抛 `JwtException`</td>
+</tr>
+<tr>
+<td>`validateToken(String token)`</td>
+<td>布尔版，内部 catch 异常并 `log.debug`</td>
+</tr>
+<tr>
+<td>`getUserId(String token)` / `getUsername(String token)`</td>
+<td>便捷读取</td>
+</tr>
+</table>
+<ul>
+<li>密钥来自 `security.jwt.secret`（环境变量 `JWT_SECRET`），<b>HS256 要求 ≥ 32 字节</b>，</li>
+</ul>
+<p>用 `Keys.hmacShaKeyFor(secret.getBytes(UTF_8))`。</p>
+<ul>
+<li>有效期 `security.jwt.expiration`，默认 86400000 ms（24 小时）。</li>
+</ul>
+<h4>5.4.3 `JwtAuthenticationFilter`（`OncePerRequestFilter`）</h4>
+<ol>
+<li>读 `Authorization`，无 `Bearer ` 前缀 → 直接放行（由后续规则决定是否 401）。</li>
+<li>`validateToken` 失败 → 放行（匿名），由 `AuthenticationEntryPoint` 返回 1002。</li>
+<li>成功 → 从 claims 构造 `UserPrincipal(userId, username, role)`，</li>
+</ol>
+<p>放入 `UsernamePasswordAuthenticationToken(principal, null, authorities)` 并写入 `SecurityContextHolder`。</p>
+<ol>
+<li><b>不查数据库</b>：JWT 无状态的代价是「禁用用户后旧令牌仍有效至过期」，</li>
+</ol>
+<p>这是已知限制，记录在案；如需即时生效，后续加令牌黑名单。</p>
+<h4>5.4.4 `SecurityConfig` 授权规则</h4>
+<table>
+<tr>
+<th>路径</th>
+<th>规则</th>
+</tr>
+<tr>
+<td>`/api/auth/**`</td>
+<td>permitAll</td>
+</tr>
+<tr>
+<td>GET `/api/products/**`、`/api/categories/**`、`/api/reviews/**`</td>
+<td>permitAll</td>
+</tr>
+<tr>
+<td>GET `/api/recommend/hot`、`/api/recommend/similar/**`</td>
+<td>permitAll</td>
+</tr>
+<tr>
+<td>`/swagger-ui/**`、`/swagger-ui.html`、`/v3/api-docs/**`</td>
+<td>permitAll</td>
+</tr>
+<tr>
+<td>`/api/admin/**`</td>
+<td>`hasRole("ADMIN")`</td>
+</tr>
+<tr>
+<td>`/api/recommend/evaluate`</td>
+<td>`hasRole("ADMIN")`（评测要扫全量行为表）</td>
+</tr>
+<tr>
+<td>其余（`/api/recommend/home`、`/api/behavior/**`、`/api/cart/**`、`/api/orders/**`、POST `/api/reviews`）</td>
+<td>authenticated</td>
+</tr>
+</table>
+<p>其他配置：`csrf.disable()`、`sessionCreationPolicy(STATELESS)`、注册 `cors`、 异常处理返回统一 JSON（HTTP 200 + code 1002/1003）、 `addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)`、 `BCryptPasswordEncoder(10)`。</p>
+<h4>5.4.5 `SecurityUtils`</h4>
+<pre><code>public static Long getCurrentUserId();   // 从 SecurityContext 取 UserPrincipal.userId
+public static Long getCurrentUserIdOrNull(); // 游客场景返回 null</code></pre>
+<p>取不到用户时抛 `BusinessException(UNAUTHORIZED)`。 所有用户维度查询（购物车、订单）必须用它的返回值过滤，<b>禁止信任前端传的 userId</b>。</p>
+<h4>5.4.6 登录流程</h4>
+<pre><code>POST /api/auth/login
+  → AuthServiceImpl.login
+      1. 按用户名查 user 表（逻辑删除自动过滤）
+         └ 不存在 → 2002（与密码错误同一提示，防账号枚举）
+      2. passwordEncoder.matches(rawPassword, user.passwordHash)
+         └ false → 2002
+      3. user.status != 1 → 2003
+      4. 更新 user.last_login_time
+      5. jwtTokenProvider.generateToken(userId, username, roleName)
+      6. 返回 UserVO（含 token，绝不含 passwordHash）</code></pre>
+<blockquote><p>不引入 `AuthenticationManager` / `UserDetailsService`：本项目只有 JWT 一种认证方式， 手工校验 BCrypt 少一层框架间接，流程一眼可见；`UserPrincipal` 仅用于承载过滤器解析出的登录主体。</p></blockquote>
+<hr/>
+<h2>6. 数据访问层设计（`mapper`）</h2>
+<p>8 个 Mapper 全部 `extends BaseMapper&lt;实体&gt;`，加 `@Mapper`。除 `BehaviorMapper` 外不写自定义 SQL： 单表 CRUD 与条件查询交给 `LambdaQueryWrapper` / `LambdaUpdateWrapper`。</p>
+<h3>6.1 `BehaviorMapper` 自定义方法（推荐算法唯一的数据入口）</h3>
+<pre><code>@Select({
+    &quot;&lt;script&gt;&quot;,
+    &quot;SELECT user_id, product_id, weight, created_at FROM behavior&quot;,
+    &quot;WHERE 1 = 1&quot;,
+    &quot;&lt;if test=&#x27;since != null&#x27;&gt; AND created_at &amp;gt;= #{since} &lt;/if&gt;&quot;,
+    &quot;ORDER BY created_at DESC&quot;,
+    &quot;LIMIT #{limit}&quot;,
+    &quot;&lt;/script&gt;&quot;
+})
+@Results({
+    @Result(property = &quot;userId&quot;,     column = &quot;user_id&quot;),
+    @Result(property = &quot;productId&quot;,  column = &quot;product_id&quot;),
+    @Result(property = &quot;weight&quot;,     column = &quot;weight&quot;),
+    @Result(property = &quot;occurredAt&quot;, column = &quot;created_at&quot;)
+})
+List&lt;BehaviorRecord&gt; selectBehaviorRecords(@Param(&quot;since&quot;) LocalDateTime since,
+                                           @Param(&quot;limit&quot;) int limit);</code></pre>
+<blockquote><p>三个要点： 1. 参数一律 `#{}`，禁止 `${}`（AGENTS.md 硬性要求）。 2. `&lt;` 在 XML 中要转义成 `&amp;gt;=`，否则 MyBatis 解析报错。 3. 直接映射成算法模型 `BehaviorRecord`，让 Entity 不进入算法层。</p></blockquote>
+<h3>6.2 其它 Mapper 的使用约定</h3>
+<table>
+<tr>
+<th>Mapper</th>
+<th>典型用法</th>
+</tr>
+<tr>
+<td>`UserMapper`</td>
+<td>按用户名查重、登录查询、后台分页</td>
+</tr>
+<tr>
+<td>`ProductMapper`</td>
+<td>详情、分页搜索、批量 `selectBatchIds`、条件扣库存</td>
+</tr>
+<tr>
+<td>`CategoryMapper`</td>
+<td>全量查询后在内存组树（两级，量小不值得递归查库）</td>
+</tr>
+<tr>
+<td>`CartMapper`</td>
+<td>按 `(userId, productId)` 查、按 userId 列、按勾选删除</td>
+</tr>
+<tr>
+<td>`OrderMapper`</td>
+<td>按 `orderNo` 查、按 userId + status 分页</td>
+</tr>
+<tr>
+<td>`OrderItemMapper`</td>
+<td>按 `orderNo` 批量查</td>
+</tr>
+<tr>
+<td>`ReviewMapper`</td>
+<td>按 productId 分页、按 `(userId, productId)` 查重</td>
+</tr>
+</table>
+<hr/>
+<h2>7. 推荐引擎详细设计（`recommend`）★核心</h2>
+<h3>7.1 类职责</h3>
+<table>
+<tr>
+<th>类</th>
+<th>职责</th>
+<th>依赖</th>
+</tr>
+<tr>
+<td>`RecommendStrategy`</td>
+<td>策略接口：`getName()`、`recommend(UserItemMatrix, RecommendRequest)`</td>
+<td>无</td>
+</tr>
+<tr>
+<td>`UserCFStrategy`</td>
+<td>基于用户的协同过滤</td>
+<td>`RecommendProperties`</td>
+</tr>
+<tr>
+<td>`ItemCFStrategy`</td>
+<td>基于物品的协同过滤（含热门惩罚）</td>
+<td>`RecommendProperties`</td>
+</tr>
+<tr>
+<td>`HotFallbackStrategy`</td>
+<td>按热度排序的热门兜底</td>
+<td>`RecommendProperties`</td>
+</tr>
+<tr>
+<td>`HybridStrategy`</td>
+<td>UserCF + ItemCF 归一化加权融合</td>
+<td>两个策略 + `RecommendProperties`</td>
+</tr>
+<tr>
+<td>`RecommendEngine`</td>
+<td>门面：路由、补全、异常降级</td>
+<td>四个策略 + `RecommendProperties`</td>
+</tr>
+<tr>
+<td>`CosineSimilarity`</td>
+<td>余弦相似度、L2 范数、带惩罚相似度</td>
+<td>无（静态工具类，私有构造）</td>
+</tr>
+<tr>
+<td>`UserItemMatrix`</td>
+<td>双索引矩阵 + 热度</td>
+<td>无</td>
+</tr>
+<tr>
+<td>`BehaviorRecord`</td>
+<td>算法输入单元 `(userId, productId, weight, occurredAt)`</td>
+<td>无</td>
+</tr>
+<tr>
+<td>`ScoredItem`</td>
+<td>算法输出单元 `(itemId, score, reason)`，`Comparable`</td>
+<td>无</td>
+</tr>
+<tr>
+<td>`RecommendRequest`</td>
+<td>请求上下文（userId、itemId、topN、neighborK、excludeItemIds）</td>
+<td>无</td>
+</tr>
+<tr>
+<td>`RecommendEvaluator`</td>
+<td>离线评测：切分、指标计算</td>
+<td>无</td>
+</tr>
+</table>
+<p><b>算法包永不注入 Mapper/Service</b>——它是纯 Java，可以被 JUnit 直接 new 出来测。</p>
+<h3>7.2 `UserItemMatrix` 数据结构</h3>
+<pre><code>Map&lt;Long, Map&lt;Long, Double&gt;&gt; userItems;      // 正向：用户 → (商品 → 加权分)
+Map&lt;Long, Map&lt;Long, Double&gt;&gt; itemUsers;      // 倒排：商品 → (用户 → 加权分)
+Map&lt;Long, Double&gt; itemPopularity;            // 商品热度 = 全站行为权重之和</code></pre>
+<p>构建规则（`build(List&lt;BehaviorRecord&gt;)`）：</p>
+<ol>
+<li>`records == null || isEmpty()` → 返回空矩阵（<b>不是 null</b>）。</li>
+<li>跳过 `userId` 或 `productId` 为 null 的记录。</li>
+<li>`weight == null` 视为 0；`weight &lt;= 0` 跳过。</li>
+<li>同一用户对同一商品多次行为：正向与倒排索引都用 `merge(..., Double::sum)` <b>累加</b>；</li>
+</ol>
+<p>热度同步累加。</p>
+<ol>
+<li>提供 `getUserItems` / `getItemUsers`（无数据返回 `Collections.emptyMap()`）、</li>
+</ol>
+<p>`getPopularity`（无数据返回 0.0）、`hasInteraction`、`allUserIds`、`allItemIds`、 `userCount`、`itemCount`、`isEmpty`。</p>
+<blockquote><p><b>为什么同时维护两个索引</b>：UserCF 按用户取向量，ItemCF 按物品取向量。 只建一个索引，另一个算法每次都要扫描全表重建，O(B) 变 O(U·B)。 累加而不是取最大值：多次浏览、先浏览后购买，就是更强的兴趣信号。</p></blockquote>
+<h3>7.3 余弦相似度 `CosineSimilarity`</h3>
+<pre><code>              Σ(i∈A∩B) wA(i) · wB(i)
+sim(A,B) = ─────────────────────────────
+             √Σ(i∈A)wA(i)² · √Σ(i∈B)wB(i)²</code></pre>
+<p>实现要点：</p>
+<table>
+<tr>
+<th>要点</th>
+<th>规则</th>
+</tr>
+<tr>
+<td>空值/空向量</td>
+<td>返回 `0.0`（<b>绝不返回 NaN</b>）</td>
+</tr>
+<tr>
+<td>无交集</td>
+<td>点积为 0 → 返回 `0.0`（提前返回，省一次开方）</td>
+</tr>
+<tr>
+<td>遍历优化</td>
+<td>遍历较短向量，在长向量里查 key</td>
+</tr>
+<tr>
+<td>除零</td>
+<td>任一范数为 0 → 返回 `0.0`</td>
+</tr>
+<tr>
+<td>浮点越界</td>
+<td>结果 `Math.max(0.0, Math.min(1.0, sim))` 收敛到 [0,1]</td>
+</tr>
+<tr>
+<td>热门惩罚</td>
+<td>`computeWithPenalty(a, b, alpha)`：`sim / \</td>
+</tr>
+</table>
+<blockquote><p><b>为什么不用皮尔森</b>：参考项目皮尔森在共同评分人数 n=0 时返回 `NaN`， 而 `NaN == 0` 为 `false`，导致除零判断失效、排序出现诡异结果。 余弦没有「减去均值」的除法，天然规避这个坑，且 [0,1] 区间好解释。</p></blockquote>
+<h3>7.4 `UserCFStrategy` 流程</h3>
+<pre><code>输入：userId、topN（默认取配置）、neighborK（默认取配置）、excludeItemIds
+1. userId 为空 或 矩阵空 → 返回空列表
+2. 目标用户无历史行为 → 返回空列表（由 Engine 走热门兜底，不在这里 NPE）
+3. 遍历全部其他用户，算 sim(目标用户, 其他用户)，sim &gt; 0 才保留
+4. 按 sim 降序排（ScoredItem 自然序），取前 K 个邻居
+5. 对每个邻居的每个商品：
+     - 目标用户已交互过的 → 跳过
+     - score += sim × 邻居对该商品的加权分
+6. 按 score 降序取 Top-N，reason = &quot;与您兴趣相似的 K 位用户也在关注&quot;</code></pre>
+<p>边界：</p>
+<table>
+<tr>
+<th>场景</th>
+<th>行为</th>
+</tr>
+<tr>
+<td>无其他用户相似度 &gt; 0</td>
+<td>返回空列表 → Engine 补热门</td>
+</tr>
+<tr>
+<td>`neighborK &lt;= 0`</td>
+<td>用配置值</td>
+</tr>
+<tr>
+<td>`topN &lt;= 0`</td>
+<td>用配置值</td>
+</tr>
+<tr>
+<td>`excludeItemIds` 为 null</td>
+<td>视为空集合</td>
+</tr>
+</table>
+<p>复杂度：`O(U × I_u × I_v)`，U 为用户数、I 为平均交互数；结果打分 `O(K × I_v)`。</p>
+<h3>7.5 `ItemCFStrategy` 流程</h3>
+<pre><code>输入：itemId、topN、excludeItemIds
+1. itemId 为空 或 矩阵空 → 返回空列表
+2. 目标商品无受众（无共现数据）→ 返回空列表（由 Engine/Service 降级）
+3. 遍历全部其他商品，用倒排向量算带惩罚相似度
+4. 按相似度降序取 Top-N，reason = &quot;关注该商品的用户也关注了此商品&quot;
+5. 排除目标商品自身与 excludeItemIds</code></pre>
+<p>热门惩罚：`sim / |受众|^α`。α 取 `recommend.popularity-penalty`， 默认 0（不惩罚）。α 增大可抑制「热门商品与万物相似」， 调参后需用评测器的 Coverage / AvgPopularity 验证。</p>
+<p>复杂度：`O(I × U_i × U_j)`。</p>
+<h3>7.6 `HotFallbackStrategy` 流程</h3>
+<ol>
+<li>矩阵空 → 空列表。</li>
+<li>遍历全部商品，`score = matrix.getPopularity(itemId)`，`score &gt; 0` 才保留。</li>
+<li>过滤 `excludeItemIds`，按 score 降序取 Top-N，`reason = "近期热门商品"`。</li>
+</ol>
+<p>「近 30 天热门」由调用方传入用近 30 天行为构建的矩阵实现，策略本身不关心时间窗口。</p>
+<h3>7.7 `HybridStrategy` 流程</h3>
+<p>两个策略分数域不同（UserCF 是加权得分，ItemCF 是相似度），<b>不能直接相加</b>：</p>
+<pre><code>归一化：norm(score) = score / max(score of that strategy)
+融合：  score(i) = 0.6 × norm(userCf(i)) + 0.4 × norm(itemCf(i))</code></pre>
+<p>规则：</p>
+<table>
+<tr>
+<th>场景</th>
+<th>行为</th>
+</tr>
+<tr>
+<td>`userId` 为空</td>
+<td>跳过 UserCF</td>
+</tr>
+<tr>
+<td>`itemId` 为空</td>
+<td>跳过 ItemCF</td>
+</tr>
+<tr>
+<td>两路都空</td>
+<td>返回空列表</td>
+</tr>
+<tr>
+<td>某路 maxScore ≤ 0 或权重 ≤ 0</td>
+<td>跳过该路（避免除零）</td>
+</tr>
+</table>
+<p>结果重新按分数降序排，`reason = "综合您的浏览与购买偏好推荐"`。</p>
+<h3>7.8 `RecommendEngine` 门面</h3>
+<p>对外四个方法：</p>
+<pre><code>List&lt;ScoredItem&gt; recommendForUser(UserItemMatrix m, Long userId, int topN, List&lt;Long&gt; exclude);
+List&lt;ScoredItem&gt; recommendSimilar(UserItemMatrix m, Long itemId, int topN, List&lt;Long&gt; exclude);
+List&lt;ScoredItem&gt; recommendHot(UserItemMatrix m, int topN, List&lt;Long&gt; exclude);
+List&lt;ScoredItem&gt; recommendHybrid(UserItemMatrix m, Long userId, Long itemId, int topN, List&lt;Long&gt; exclude);</code></pre>
+<p>内部统一走 `executeWithFallback(matrix, request, scenario, supplier, allowSupplement)`：</p>
+<pre><code>try   result = supplier.get()                 // 调具体策略
+catch 任意异常 → log.error(&quot;[scenario] 推荐计算异常&quot;, e); result = 空列表
+if result == null → 空列表
+if !allowSupplement 或 result.size() &gt;= topN → 直接返回
+补全：
+  fallbackRequest.topN = topN - result.size()
+  fallbackRequest.excludeItemIds = 已推荐 ID ∪ 原 exclude
+  try 热门策略补足，异常 → log.error 后返回原结果
+  用 LinkedHashSet 合并去重（ScoredItem 是 @Data，按值去重）</code></pre>
+<table>
+<tr>
+<th>场景</th>
+<th>策略</th>
+<th>补全</th>
+</tr>
+<tr>
+<td>首页推荐</td>
+<td>UserCF</td>
+<td>是</td>
+</tr>
+<tr>
+<td>详情页相似</td>
+<td>ItemCF</td>
+<td>是</td>
+</tr>
+<tr>
+<td>游客/冷启动</td>
+<td>HotFallback</td>
+<td>否（自身就是兜底）</td>
+</tr>
+<tr>
+<td>猜你喜欢</td>
+<td>Hybrid</td>
+<td>是</td>
+</tr>
+</table>
+<blockquote><p><b>降级的哲学</b>：推荐是增强功能，不是核心交易链路。 算法抛异常必须返回「热门商品」而不是 500，否则一个相似度 bug 会把整个首页搞挂。</p></blockquote>
+<h3>7.9 冷启动矩阵</h3>
+<table>
+<tr>
+<th>场景</th>
+<th>处理位置</th>
+<th>做法</th>
+</tr>
+<tr>
+<td>新用户无行为</td>
+<td>`UserCFStrategy` 返回空 → Engine 补全</td>
+<td>热门 Top-N</td>
+</tr>
+<tr>
+<td>新商品无受众</td>
+<td>`ItemCFStrategy` 返回空 → Engine 补全</td>
+<td>热门 Top-N（同类目热门属增强项，v1 不做）</td>
+</tr>
+<tr>
+<td>矩阵为空（全站无行为）</td>
+<td>各策略返回空</td>
+<td>Service 返回空列表，前端展示「暂无推荐」</td>
+</tr>
+<tr>
+<td>引擎异常</td>
+<td>Engine catch</td>
+<td>热门兜底，页面始终可用</td>
+</tr>
+</table>
+<h3>7.10 `RecommendEvaluator` 离线评测</h3>
+<p>接口：</p>
+<pre><code>@FunctionalInterface
+interface Recommender { List&lt;ScoredItem&gt; recommend(Long userId, int topN); }
+
+static EvaluationResult evaluate(List&lt;BehaviorRecord&gt; train, List&lt;BehaviorRecord&gt; test,
+                                 Recommender recommender, int topN);
+static List&lt;BehaviorRecord&gt;[] splitByTime(List&lt;BehaviorRecord&gt; records, double trainRatio);</code></pre>
+<p>流程：</p>
+<ol>
+<li>用训练集构建矩阵（`trainMatrix`）。</li>
+<li>测试集按用户聚合真实正样本 `T(u)`（去重）。</li>
+<li>物品全集 `I = 训练集物品 ∪ 测试集物品`（覆盖率分母）。</li>
+<li>对每个有测试正样本的用户 `u` 调推荐器，得 `R(u)`：</li>
+</ol>
+<ul>
+<ul>
+<li>`hit = |R(u) ∩ T(u)|`</li>
+<li>`Precision(u) = hit / |R(u)|`（除以<b>实际推荐数</b>，而非固定 N，避免不满 N 时失真）</li>
+<li>`Recall(u) = hit / |T(u)|`</li>
+</ul>
+</ul>
+<ol>
+<li>指标：</li>
+</ol>
+<table>
+<tr>
+<th>指标</th>
+<th>公式</th>
+</tr>
+<tr>
+<td>Precision@N</td>
+<td>`(1/\</td>
+</tr>
+<tr>
+<td>Recall@N</td>
+<td>`(1/\</td>
+</tr>
+<tr>
+<td>F1</td>
+<td>`2PR / (P + R)`，`P + R == 0` 时取 0</td>
+</tr>
+<tr>
+<td>Coverage</td>
+<td>`\</td>
+</tr>
+<tr>
+<td>AvgPopularity</td>
+<td>`(1/Σ\</td>
+</tr>
+</table>
+<ol>
+<li>`splitByTime`：按 `occurredAt` 升序（null 排最前），</li>
+</ol>
+<p>前 `floor(size × trainRatio)` 条为训练集，其余为测试集；默认 0.8。</p>
+<blockquote><p><b>评测必须按时间切分</b>，不能随机切：随机切会让「未来行为」泄漏进训练集， 指标虚高。这是推荐系统评测最常见的自欺欺人。</p></blockquote>
+<h3>7.11 性能与容量边界</h3>
+<table>
+<tr>
+<th>环节</th>
+<th>复杂度</th>
+<th>说明</th>
+</tr>
+<tr>
+<td>矩阵构建</td>
+<td>`O(B)`</td>
+<td>B 为行为条数，上限 `max-behavior-rows`</td>
+</tr>
+<tr>
+<td>UserCF</td>
+<td>`O(U² · I)`</td>
+<td>用户量是瓶颈；本项目单机数据量（千级用户）可接受</td>
+</tr>
+<tr>
+<td>ItemCF</td>
+<td>`O(I² · U)`</td>
+<td>商品量是瓶颈</td>
+</tr>
+<tr>
+<td>内存</td>
+<td>`O(B)`</td>
+<td>双索引各存一份 (user,item,weight)</td>
+</tr>
+</table>
+<p>若数据量增长到十万级用户/商品，再引入离线预计算相似度矩阵，而不是现在做。</p>
+<hr/>
+<h2>8. 业务服务层设计（`service` / `service/impl`）</h2>
+<p>所有实现类：`@Service` + `@RequiredArgsConstructor` + `@Slf4j`，构造器注入。</p>
+<h3>8.1 `AuthService`</h3>
+<pre><code>UserVO register(RegisterRequest request);   // @Transactional
+UserVO login(LoginRequest request);         // 写 last_login_time</code></pre>
+<p>register 规则：</p>
+<ol>
+<li>两次密码不一致 → `PASSWORD_MISMATCH`。</li>
+<li>用户名已存在（逻辑删除的不算）→ `USERNAME_EXISTS`。</li>
+<li>`passwordHash = passwordEncoder.encode(raw)`；`nickname` 默认等于 username；</li>
+</ol>
+<p>`role = 1`、`status = 1`。</p>
+<ol>
+<li>返回 UserVO（含 token，注册即登录）。</li>
+</ol>
+<p>login 规则见 5.4.6，失败提示统一为 2002。</p>
+<h3>8.2 `ProductService`</h3>
+<pre><code>PageResult&lt;ProductVO&gt; page(ProductQuery query, int pageNum, int pageSize);
+ProductVO detail(Long id);   // 不存在或已下架 → PRODUCT_NOT_FOUND</code></pre>
+<p>`page` 过滤条件：`status = 1`、关键字 `like name`、`categoryId`（含子类目）、 `price` 区间；排序：`sales desc`（默认） / `price asc` / `price desc` / `create_time desc`。</p>
+<h3>8.3 `CategoryService`</h3>
+<pre><code>List&lt;CategoryVO&gt; tree();   // 一次查全量，内存组装两级树</code></pre>
+<h3>8.4 `BehaviorService`</h3>
+<pre><code>void report(Long userId, BehaviorReportRequest request);
+UserItemMatrix buildMatrix(LocalDateTime since);   // since 为 null 表示全量</code></pre>
+<p>report 规则：</p>
+<ol>
+<li>`BehaviorType.of(code)` 失败 → `PARAM_ERROR`。</li>
+<li>商品不存在 → `PRODUCT_NOT_FOUND`（防止脏数据污染矩阵）。</li>
+<li>`RATE` 必须带 1–5 的 rating，否则 `PARAM_ERROR`。</li>
+<li>`behavior.applyType(type)` 自动填 `behaviorType` 与 `weight`，`createdAt = now()`。</li>
+</ol>
+<blockquote><p>需求里「重复浏览更新权重而非无限累加」与算法层「同用户同商品累加」存在张力： v1 明确选择<b>累加</b>（矩阵侧），因为累加能表达「反复浏览 = 强兴趣」； 若后续要做防刷，在 report 处按「同 type 同商品当天已存在则不再写入」去重。</p></blockquote>
+<p>`buildMatrix` 调 `behaviorMapper.selectBehaviorRecords(since, maxBehaviorRows)` 后 `UserItemMatrix.build(...)`。</p>
+<h3>8.5 `RecommendService`</h3>
+<pre><code>List&lt;RecommendVO&gt; recommendForUser(Long userId, int topN);
+List&lt;RecommendVO&gt; recommendSimilar(Long itemId, int topN);
+List&lt;RecommendVO&gt; recommendHot(int topN);
+List&lt;RecommendVO&gt; recommendHybrid(Long userId, Long itemId, int topN);
+RecommendEvaluator.EvaluationResult evaluate(int topN);</code></pre>
+<p>编排职责（算法不查库，所以这些都在 Service）：</p>
+<table>
+<tr>
+<th>步骤</th>
+<th>做法</th>
+</tr>
+<tr>
+<td>归一化 topN</td>
+<td>`topN &lt;= 0` → 配置默认值</td>
+</tr>
+<tr>
+<td>构建矩阵</td>
+<td>`behaviorService.buildMatrix(since)`；热门用「近 hotDays 天」，其余用全量</td>
+</tr>
+<tr>
+<td>排除列表</td>
+<td>已下架商品 + 该用户已购买商品（`behavior_type = PURCHASE`）</td>
+</tr>
+<tr>
+<td>算法调用</td>
+<td>只调 `RecommendEngine` 的四个方法</td>
+</tr>
+<tr>
+<td>转 VO</td>
+<td>`selectBatchIds(ids)` 批量查商品 → `ProductVO.from` → `RecommendVO.of(product, item)`</td>
+</tr>
+<tr>
+<td>保序</td>
+<td><b>按 `ScoredItem` 的顺序遍历</b>组装，不要按商品 ID 排序</td>
+</tr>
+<tr>
+<td>过滤</td>
+<td>商品不存在或 `status != 1` 的直接跳过</td>
+</tr>
+</table>
+<p>`evaluate`：取全量行为 → 少于 10 条返回空结果并 `log.warn` → `splitByTime(0.8)` → 用训练集矩阵构造 `Recommender` 调评测器。</p>
+<h3>8.6 `CartService`</h3>
+<pre><code>void add(Long userId, CartAddRequest request);
+List&lt;CartVO&gt; list(Long userId);
+void update(Long userId, Long cartId, CartUpdateRequest request);
+void remove(Long userId, Long cartId);
+void clear(Long userId);</code></pre>
+<p>规则：同一 `(userId, productId)` 已存在则数量累加；`update/remove` 必须先校验 `cart.userId == 当前用户`（越权防护）；数量不得超过库存；`list` 联查商品组装 VO。</p>
+<h3>8.7 `OrderService`</h3>
+<pre><code>String create(Long userId, OrderCreateRequest request);            // @Transactional，返回订单号
+PageResult&lt;OrderVO&gt; page(Long userId, Integer status, long pageNum, long pageSize);
+OrderVO detail(Long userId, String orderNo);
+void cancel(Long userId, String orderNo);                          // @Transactional</code></pre>
+<p>`create` 事务内步骤（任一步失败整体回滚）：</p>
+<ol>
+<li>查当前用户 `checked = 1` 的购物车项；为空 → `CART_EMPTY`。</li>
+<li>逐项校验商品存在且 `status = 1`；否则 `PRODUCT_NOT_FOUND`。</li>
+<li>扣库存（<b>条件更新防超卖</b>）：</li>
+</ol>
+<p>`UPDATE product SET stock = stock - #{qty} WHERE id = #{id} AND stock &gt;= #{qty}`， 影响行数 0 → `STOCK_NOT_ENOUGH`。</p>
+<ol>
+<li>以数据库当前价计算 `subtotal` 与 `totalAmount`（不信任前端价格）。</li>
+<li>生成订单号：`yyyyMMddHHmmss` + 6 位随机数。</li>
+<li>插入 `orders`，再插 `order_item`（商品名、单价做快照）。</li>
+<li>记录 `PURCHASE` 行为（走 `BehaviorService.report`，保证权重逻辑唯一）。</li>
+<li>物理删除已下单的购物车项（购物车是临时数据，表无逻辑删除字段）。</li>
+<li>返回订单号（前端据此跳转订单详情）。</li>
+</ol>
+<p>`cancel`：只能取消 `PENDING`（`OrderStatus.cancellable()`），否则 `ORDER_STATUS_ILLEGAL`； 状态改 `CANCELLED`，逐项回滚库存。</p>
+<p>`page/detail` 必须拼 `userId` 过滤（传别人的 orderNo 也查不到）。</p>
+<h3>8.8 `ReviewService`</h3>
+<pre><code>void submit(Long userId, ReviewRequest request);   // @Transactional
+PageResult&lt;ReviewVO&gt; pageByProduct(Long productId, int pageNum, int pageSize);</code></pre>
+<p>submit：同一用户同一商品已评价 → `REVIEW_EXISTS`；插入评价后 调用 `BehaviorService.report` 写一条 `RATE` 行为（带 rating）。</p>
+<h3>8.9 `AdminService`</h3>
+<pre><code>ProductVO saveProduct(Product product);
+void deleteProduct(Long id);
+void updateProductStatus(Long id, Integer status);
+Long saveCategory(Category category);
+void deleteCategory(Long id);
+PageResult&lt;UserVO&gt; pageUsers(String keyword, long pageNum, long pageSize);
+void updateUserStatus(Long id, Integer status);
+PageResult&lt;OrderVO&gt; pageOrders(Integer status, long pageNum, long pageSize);
+void updateOrderStatus(String orderNo, Integer status);
+Map&lt;String, Object&gt; statistics();   // 用户数、商品数、订单数、行为数、总销量</code></pre>
+<p>`statistics` 用 `selectCount` 直查，销量用小范围 `selectList` 后求和； 返回 `Map` 便于前端直接渲染卡片。</p>
+<hr/>
+<h2>9. 接口层设计（`controller`）</h2>
+<p>通用约定：`@RestController` + `@RequestMapping("/api/xxx")`； 分页参数 `pageNum`（默认 1）、`pageSize`（默认 20）；返回值一律 `Result&lt;T&gt;`。</p>
+<h3>9.1 接口清单</h3>
+<table>
+<tr>
+<th>#</th>
+<th>方法与路径</th>
+<th>入参</th>
+<th>返回 `data`</th>
+<th>权限</th>
+</tr>
+<tr>
+<td>1</td>
+<td>POST `/api/auth/register`</td>
+<td>body `RegisterRequest`</td>
+<td>`UserVO`</td>
+<td>公开</td>
+</tr>
+<tr>
+<td>2</td>
+<td>POST `/api/auth/login`</td>
+<td>body `LoginRequest`</td>
+<td>`UserVO`（含 token）</td>
+<td>公开</td>
+</tr>
+<tr>
+<td>3</td>
+<td>GET `/api/products?pageNum&amp;pageSize`</td>
+<td>`ProductQuery`</td>
+<td>`PageResult&lt;ProductVO&gt;`</td>
+<td>公开</td>
+</tr>
+<tr>
+<td>4</td>
+<td>GET `/api/products/{id}`</td>
+<td>path id</td>
+<td>`ProductVO`</td>
+<td>公开</td>
+</tr>
+<tr>
+<td>5</td>
+<td>GET `/api/categories`</td>
+<td>无</td>
+<td>`List&lt;CategoryVO&gt;`</td>
+<td>公开</td>
+</tr>
+<tr>
+<td>6</td>
+<td>GET `/api/recommend/home?topN=10`</td>
+<td>topN</td>
+<td>`List&lt;RecommendVO&gt;`</td>
+<td>登录</td>
+</tr>
+<tr>
+<td>7</td>
+<td>GET `/api/recommend/similar/{productId}?topN=10`</td>
+<td>productId、topN</td>
+<td>`List&lt;RecommendVO&gt;`</td>
+<td>公开</td>
+</tr>
+<tr>
+<td>8</td>
+<td>GET `/api/recommend/hot?topN=10`</td>
+<td>topN</td>
+<td>`List&lt;RecommendVO&gt;`</td>
+<td>公开</td>
+</tr>
+<tr>
+<td>9</td>
+<td>GET `/api/recommend/hybrid?itemId&amp;topN`</td>
+<td>itemId（可空）、topN</td>
+<td>`List&lt;RecommendVO&gt;`</td>
+<td>登录</td>
+</tr>
+<tr>
+<td>10</td>
+<td>POST `/api/behavior/report`</td>
+<td>body `BehaviorReportRequest`</td>
+<td>无</td>
+<td>登录</td>
+</tr>
+<tr>
+<td>11</td>
+<td>GET `/api/cart`</td>
+<td>无</td>
+<td>`List&lt;CartVO&gt;`</td>
+<td>登录</td>
+</tr>
+<tr>
+<td>12</td>
+<td>POST `/api/cart`</td>
+<td>body `CartAddRequest`</td>
+<td>无</td>
+<td>登录</td>
+</tr>
+<tr>
+<td>13</td>
+<td>PUT `/api/cart/{cartId}`</td>
+<td>body `CartUpdateRequest`</td>
+<td>无</td>
+<td>登录</td>
+</tr>
+<tr>
+<td>14</td>
+<td>DELETE `/api/cart/{cartId}`</td>
+<td>path id</td>
+<td>无</td>
+<td>登录</td>
+</tr>
+<tr>
+<td>15</td>
+<td>DELETE `/api/cart`</td>
+<td>无</td>
+<td>无（清空）</td>
+<td>登录</td>
+</tr>
+<tr>
+<td>16</td>
+<td>GET `/api/cart/total`</td>
+<td>无</td>
+<td>`BigDecimal`（勾选合计）</td>
+<td>登录</td>
+</tr>
+<tr>
+<td>17</td>
+<td>POST `/api/orders`</td>
+<td>body `OrderCreateRequest`</td>
+<td>`String`（订单号）</td>
+<td>登录</td>
+</tr>
+<tr>
+<td>18</td>
+<td>GET `/api/orders?status&amp;pageNum&amp;pageSize`</td>
+<td>status、分页</td>
+<td>`PageResult&lt;OrderVO&gt;`</td>
+<td>登录</td>
+</tr>
+<tr>
+<td>19</td>
+<td>GET `/api/orders/{orderNo}`</td>
+<td>path</td>
+<td>`OrderVO`</td>
+<td>登录</td>
+</tr>
+<tr>
+<td>20</td>
+<td>POST `/api/orders/{orderNo}/cancel`</td>
+<td>path</td>
+<td>无</td>
+<td>登录</td>
+</tr>
+<tr>
+<td>21</td>
+<td>POST `/api/reviews`</td>
+<td>body `ReviewRequest`</td>
+<td>无</td>
+<td>登录</td>
+</tr>
+<tr>
+<td>22</td>
+<td>GET `/api/reviews?productId&amp;pageNum&amp;pageSize`</td>
+<td>商品+分页</td>
+<td>`PageResult&lt;ReviewVO&gt;`</td>
+<td>公开</td>
+</tr>
+<tr>
+<td>23</td>
+<td>POST `/api/admin/products`</td>
+<td>body `Product`</td>
+<td>`ProductVO`</td>
+<td>管理员</td>
+</tr>
+<tr>
+<td>24</td>
+<td>PUT `/api/admin/products/{id}`</td>
+<td>body `Product`</td>
+<td>`ProductVO`</td>
+<td>管理员</td>
+</tr>
+<tr>
+<td>25</td>
+<td>DELETE `/api/admin/products/{id}`</td>
+<td>path id</td>
+<td>无（逻辑删除）</td>
+<td>管理员</td>
+</tr>
+<tr>
+<td>26</td>
+<td>PUT `/api/admin/products/{id}/status?status=`</td>
+<td>id、status</td>
+<td>无</td>
+<td>管理员</td>
+</tr>
+<tr>
+<td>27</td>
+<td>POST `/api/admin/categories`</td>
+<td>body `Category`</td>
+<td>`Long`（类目 ID）</td>
+<td>管理员</td>
+</tr>
+<tr>
+<td>28</td>
+<td>DELETE `/api/admin/categories/{id}`</td>
+<td>path id</td>
+<td>无</td>
+<td>管理员</td>
+</tr>
+<tr>
+<td>29</td>
+<td>GET `/api/admin/users?keyword&amp;pageNum&amp;pageSize`</td>
+<td>关键字+分页</td>
+<td>`PageResult&lt;UserVO&gt;`</td>
+<td>管理员</td>
+</tr>
+<tr>
+<td>30</td>
+<td>PUT `/api/admin/users/{id}/status?status=`</td>
+<td>id、status</td>
+<td>无</td>
+<td>管理员</td>
+</tr>
+<tr>
+<td>31</td>
+<td>GET `/api/admin/orders?status&amp;pageNum&amp;pageSize`</td>
+<td>状态+分页</td>
+<td>`PageResult&lt;OrderVO&gt;`</td>
+<td>管理员</td>
+</tr>
+<tr>
+<td>32</td>
+<td>PUT `/api/admin/orders/{orderNo}/status?status=`</td>
+<td>订单号、状态</td>
+<td>无</td>
+<td>管理员</td>
+</tr>
+<tr>
+<td>33</td>
+<td>GET `/api/admin/statistics`</td>
+<td>无</td>
+<td>`Map&lt;String,Object&gt;`</td>
+<td>管理员</td>
+</tr>
+<tr>
+<td>34</td>
+<td>GET `/api/recommend/evaluate?topN=10`</td>
+<td>topN</td>
+<td>`EvaluationResult`</td>
+<td>管理员</td>
+</tr>
+</table>
+<blockquote><p>`/api/recommend/evaluate` 放在管理员权限下：评测要扫全量行为表，不能开放给游客。 Controller 中取当前用户统一用 `SecurityUtils.getCurrentUserId()`。</p></blockquote>
+<h3>9.2 DTO 字段（校验注解必须写全）</h3>
+<table>
+<tr>
+<th>DTO</th>
+<th>字段</th>
+</tr>
+<tr>
+<td>`LoginRequest`</td>
+<td>username `@NotBlank @Size(4,20)`；password `@NotBlank @Size(6,32)`</td>
+</tr>
+<tr>
+<td>`RegisterRequest`</td>
+<td>username `@NotBlank @Pattern(^[a-zA-Z0-9_]{4,20}$)`；password `@NotBlank @Size(6,32)`；confirmPassword `@NotBlank`；email `@Email`（可空）</td>
+</tr>
+<tr>
+<td>`ProductQuery`</td>
+<td>keyword、categoryId、minPrice、maxPrice、sort（均可空）</td>
+</tr>
+<tr>
+<td>`BehaviorReportRequest`</td>
+<td>productId `@NotNull`；behaviorType `@NotNull`；rating（RATE 时业务校验 1–5）</td>
+</tr>
+<tr>
+<td>`CartAddRequest`</td>
+<td>productId `@NotNull`；quantity `@NotNull @Min(1)`</td>
+</tr>
+<tr>
+<td>`CartUpdateRequest`</td>
+<td>quantity `@NotNull @Min(1)`；checked（0/1，可空）</td>
+</tr>
+<tr>
+<td>`OrderCreateRequest`</td>
+<td>receiverName `@NotBlank`；receiverPhone `@NotBlank`；receiverAddr `@NotBlank`</td>
+</tr>
+<tr>
+<td>`ReviewRequest`</td>
+<td>productId `@NotNull`；orderNo（可空）；rating `@NotNull @Min(1) @Max(5)`；content（可空，≤500）</td>
+</tr>
+</table>
+<h3>9.3 VO 字段</h3>
+<table>
+<tr>
+<th>VO</th>
+<th>字段</th>
+</tr>
+<tr>
+<td>`UserVO`</td>
+<td>id、username、nickname、email、avatar、role(Integer)、token（仅登录/注册返回）</td>
+</tr>
+<tr>
+<td>`ProductVO`</td>
+<td>id、categoryId、categoryName、name、subtitle、mainImage、price、originalPrice、stock、sales、status、description</td>
+</tr>
+<tr>
+<td>`CategoryVO`</td>
+<td>id、name、parentId、sortOrder、children(List&lt;CategoryVO&gt;)</td>
+</tr>
+<tr>
+<td>`RecommendVO`</td>
+<td>id、name、subtitle、mainImage、price、sales、score(double)、reason</td>
+</tr>
+<tr>
+<td>`CartVO`</td>
+<td>id、productId、productName、mainImage、price、quantity、checked、subtotal、stock</td>
+</tr>
+<tr>
+<td>`OrderVO`</td>
+<td>orderNo、totalAmount、status(Integer)、statusName、receiverName、receiverPhone、receiverAddr、createTime、items(List&lt;OrderItemVO&gt;)</td>
+</tr>
+<tr>
+<td>`OrderItemVO`</td>
+<td>productId、productName、price、quantity、subtotal</td>
+</tr>
+<tr>
+<td>`ReviewVO`</td>
+<td>id、userId、username、productId、rating、content、createTime</td>
+</tr>
+</table>
+<p>转换方法统一写成静态工厂：`ProductVO.from(Product)`、`CategoryVO.from(Category)`、 `OrderItemVO.from(OrderItem)`、`ReviewVO.from(Review)`、`RecommendVO.of(ProductVO, ScoredItem)`。 <b>Entity 永不直接返回给前端。</b></p>
+<hr/>
+<h2>10. 关键时序</h2>
+<h3>10.1 行为上报 → 推荐生效</h3>
+<pre><code>前端(详情页/加购/下单/评价)
+  → POST /api/behavior/report（JWT）
+  → BehaviorController
+  → BehaviorService.report
+       ├ 校验商品存在
+       ├ applyType 填 weight
+       └ insert behavior
+  → 返回 Result.success()
+
+下次 GET /api/recommend/home
+  → RecommendService.recommendForUser
+       ├ BehaviorService.buildMatrix(null)      ← 读 behavior 表
+       ├ RecommendEngine.recommendForUser       ← UserCF + 热门补全
+       └ 批量查商品 → List&lt;RecommendVO&gt;</code></pre>
+<blockquote><p>行为表是整条链路的<b>唯一数据源</b>。这就是参考项目缺 behavior 表、 只能从订单反推、冷启动无解的根本原因。</p></blockquote>
+<h3>10.2 下单</h3>
+<pre><code>POST /api/orders
+  → @Transactional
+      1 查勾选购物车（空 → 4004）
+      2 校验商品上架
+      3 条件 UPDATE 扣库存（0 行 → 4001 回滚）
+      4 计算金额（DB 价格）
+      5 insert orders
+      6 insert order_item（快照）
+      7 BehaviorService.report(PURCHASE)
+      8 delete 已下单购物车项
+  → 返回 OrderVO
+异常：任意步骤抛 BusinessException → 事务整体回滚</code></pre>
+<h3>10.3 离线评测</h3>
+<pre><code>POST /api/admin/orders? ... 不，是 POST /api/recommend/evaluate
+  → RecommendService.evaluate
+       ├ selectBehaviorRecords(null, maxRows)
+       ├ size &lt; 10 → warn + 空结果
+       ├ splitByTime(0.8)
+       └ RecommendEvaluator.evaluate(train, test, recommender, topN)
+  → 返回 Precision/Recall/F1/Coverage/AvgPopularity</code></pre>
+<hr/>
+<h2>11. 异常与响应约定</h2>
+<table>
+<tr>
+<th>场景</th>
+<th>HTTP</th>
+<th>code</th>
+<th>message</th>
+</tr>
+<tr>
+<td>成功</td>
+<td>200</td>
+<td>0</td>
+<td>success</td>
+</tr>
+<tr>
+<td>参数校验失败</td>
+<td>200</td>
+<td>1001</td>
+<td>具体字段提示（取第一条）</td>
+</tr>
+<tr>
+<td>未登录/令牌过期</td>
+<td>200</td>
+<td>1002</td>
+<td>未登录或令牌无效</td>
+</tr>
+<tr>
+<td>角色不足</td>
+<td>200</td>
+<td>1003</td>
+<td>无权限访问</td>
+</tr>
+<tr>
+<td>业务错误</td>
+<td>200</td>
+<td>2xxx/3xxx/4xxx</td>
+<td>枚举默认文案或自定义</td>
+</tr>
+<tr>
+<td>未捕获异常</td>
+<td>200</td>
+<td>9999</td>
+<td>系统内部错误（堆栈只进日志）</td>
+</tr>
+</table>
+<p>分页响应示例：</p>
+<pre><code>{
+  &quot;code&quot;: 0,
+  &quot;message&quot;: &quot;success&quot;,
+  &quot;data&quot;: {
+    &quot;total&quot;: 128,
+    &quot;pageNum&quot;: 1,
+    &quot;pageSize&quot;: 20,
+    &quot;pages&quot;: 7,
+    &quot;records&quot;: []
+  },
+  &quot;timestamp&quot;: 1761600000000
+}</code></pre>
+<hr/>
+<h2>12. 单元测试设计</h2>
+<p>测试位置：`recommend-server/src/test/java/com/deng/recommend/...`（<b>禁止放 src/main</b>）。 命名：`被测方法_场景_预期结果`。</p>
+<table>
+<tr>
+<th>测试类</th>
+<th>用例（至少）</th>
+</tr>
+<tr>
+<td>`CosineSimilarityTest`</td>
+<td>`compute_sameVector_returnsOne`、`compute_noCommonKey_returnsZero`、`compute_emptyVector_returnsZero`、`computeWithPenalty_alphaZero_equalsCosine`、`compute_zeroNorm_returnsZero`</td>
+</tr>
+<tr>
+<td>`UserItemMatrixTest`</td>
+<td>`build_null_returnsEmptyMatrix`、`build_duplicateBehavior_sumsWeight`、`build_negativeWeight_skipped`、`build_populatesInvertedIndex`</td>
+</tr>
+<tr>
+<td>`UserCFStrategyTest`</td>
+<td>`recommend_noHistory_returnsEmpty`、`recommend_excludesInteractedItems`、`recommend_sortsByScoreDesc`、`recommend_respectsNeighborK`、`recommend_excludeIdsFiltered`</td>
+</tr>
+<tr>
+<td>`ItemCFStrategyTest`</td>
+<td>`recommend_excludesSelf`、`recommend_noCooccurrence_returnsEmpty`、`recommend_sortsBySimilarityDesc`</td>
+</tr>
+<tr>
+<td>`HotFallbackStrategyTest`</td>
+<td>`recommend_sortsByPopularityDesc`、`recommend_excludesIds`、`recommend_emptyMatrix_returnsEmpty`</td>
+</tr>
+<tr>
+<td>`HybridStrategyTest`</td>
+<td>`recommend_bothEmpty_returnsEmpty`、`recommend_normalizesBeforeMerge`、`recommend_weightZero_ignored`</td>
+</tr>
+<tr>
+<td>`RecommendEngineTest`</td>
+<td>`recommendForUser_insufficient_fillsWithHot`、`recommendForUser_strategyThrows_degradesToHot`、`recommendHot_doesNotSupplement`、`supplement_noDuplicateItems`</td>
+</tr>
+<tr>
+<td>`RecommendEvaluatorTest`</td>
+<td>`evaluate_perfectHit_precisionAndRecallOne`、`evaluate_noHit_returnsZero`、`splitByTime_ratio80_20`、`evaluate_coverageUsesItemUnion`</td>
+</tr>
+<tr>
+<td>`AuthServiceImplTest`（Mockito）</td>
+<td>`register_duplicateUsername_throws2002`、`register_encodesPassword`、`login_wrongPassword_throws2001`、`login_success_returnsToken`</td>
+</tr>
+<tr>
+<td>`BehaviorServiceImplTest`</td>
+<td>`report_productNotFound_throws3001`、`report_rateWithoutRating_throws1001`、`report_view_setsWeightOne`</td>
+</tr>
+<tr>
+<td>`RecommendServiceImplTest`（Mockito）</td>
+<td>`recommendForUser_keepsScoreOrder`、`recommendForUser_skipsOffShelfProduct`、`normalizeTopN_nonPositive_usesDefault`</td>
+</tr>
+<tr>
+<td>`OrderServiceImplTest`</td>
+<td>`create_emptyCart_throws4004`、`create_stockNotEnough_throws4001`、`create_success_deductsStockAndWritesPurchase`、`cancel_paidOrder_throws4003`、`cancel_pending_restoresStock`</td>
+</tr>
+<tr>
+<td>`CartServiceImplTest`</td>
+<td>`add_existingItem_increasesQuantity`、`update_otherUsersCart_throws1003`</td>
+</tr>
+</table>
+<p>数据库相关测试用 Mockito 隔离；需要真实 SQL 的（如条件扣库存）可用 H2 内存库 + `src/test/resources/schema-h2.sql`。测试必须可重复执行，禁止依赖本机 MySQL 数据。</p>
+<hr/>
+<h2>13. 编码实施顺序（文件清单）</h2>
+<p>严格按 `docs/10` 的 10 个阶段推进，每阶段结束 `mvnw compile`（或 `test`）通过并提交一次。</p>
+<table>
+<tr>
+<th>阶段</th>
+<th>新建文件</th>
+<th>完成标志</th>
+<th>commit</th>
+</tr>
+<tr>
+<td>1</td>
+<td>`sql/schema.sql`（已存在，执行即可）+ `tool/SeedDataGenerator`</td>
+<td>8 张表建好，演示数据导入</td>
+<td>`chore(db): init schema and seed generator`</td>
+</tr>
+<tr>
+<td>2</td>
+<td>`entity/enums` 3 个 + `entity` 8 个 + `RecommendApplication`</td>
+<td>`mvnw compile` 通过</td>
+<td>`feat(entity): add enums and entities`</td>
+</tr>
+<tr>
+<td>3</td>
+<td>`common` 5 个 + `config` 6 个 + `security` 3 个</td>
+<td>启动类能起来</td>
+<td>`feat(core): add common, config and JWT security`</td>
+</tr>
+<tr>
+<td>4</td>
+<td>`mapper` 8 个 + `application.yml`</td>
+<td>能连上 MySQL</td>
+<td>`feat(mapper): add mappers and datasource config`</td>
+</tr>
+<tr>
+<td>5</td>
+<td>`recommend` 12 个（策略/引擎/模型/相似度/评测）</td>
+<td>`mvnw compile` 通过</td>
+<td>`feat(recsys): implement recommendation engine`</td>
+</tr>
+<tr>
+<td>6</td>
+<td>`src/test/java` 算法测试</td>
+<td>`mvnw test` 全绿</td>
+<td>`test(recsys): cover similarity, CF and fallback`</td>
+</tr>
+<tr>
+<td>7</td>
+<td>`dto` 8 个 + `vo` 8 个 + Auth/Product/Category/Behavior 的 Service+Controller</td>
+<td>注册登录跑通</td>
+<td>`feat(user): add auth and product apis`</td>
+</tr>
+<tr>
+<td>8</td>
+<td>RecommendService + RecommendController</td>
+<td>Swagger 能调 `/api/recommend/home`</td>
+<td>`feat(recsys): expose recommend apis`</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Cart/Order/Review/Admin 的 Service+Controller</td>
+<td>下单流程走通</td>
+<td>`feat(trade): add cart, order and review apis`</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Service 层单测 + 评测接口</td>
+<td>输出 Precision/Recall/F1</td>
+<td>`test(recsys): add service tests and evaluation`</td>
+</tr>
+</table>
+<blockquote><p>阶段 2 的 8 个实体、11 个文件可以<b>一次性写完再编译</b>，它们之间只有枚举依赖， 不存在「写完一个才能写下一个」的问题；阶段 5 的算法类同理。</p></blockquote>
+<hr/>
+<h2>14. 设计约束回顾</h2>
+<table>
+<tr>
+<th>约束</th>
+<th>落地方式</th>
+</tr>
+<tr>
+<td>算法纯 Java、不引 ML 框架</td>
+<td>`recommend` 包只有 JDK 集合类与 Lombok</td>
+</tr>
+<tr>
+<td>算法可单测</td>
+<td>输入 `UserItemMatrix`，不注入 Mapper</td>
+</tr>
+<tr>
+<td>无魔法数字</td>
+<td>全部进 `RecommendProperties`</td>
+</tr>
+<tr>
+<td>无硬编码口令</td>
+<td>`application.yml` 用 `${DB_PASSWORD}`（无默认值，缺失即启动失败），密钥用 `${JWT_SECRET:...}`</td>
+</tr>
+<tr>
+<td>全参数化 SQL</td>
+<td>Mapper 只用 `#{}`，`LambdaQueryWrapper`</td>
+</tr>
+<tr>
+<td>密码 BCrypt</td>
+<td>`BCryptPasswordEncoder(10)`，字段名 `passwordHash`</td>
+</tr>
+<tr>
+<td>越权防护</td>
+<td>`SecurityUtils.getCurrentUserId()` + 查询强制拼 userId</td>
+</tr>
+<tr>
+<td>事务</td>
+<td>下单/取消/注册/评价加 `@Transactional(rollbackFor = Exception.class)`</td>
+</tr>
+<tr>
+<td>推荐可降级</td>
+<td>引擎 catch 全部异常 → 热门兜底</td>
+</tr>
+</table>
+<h2>15. 迭代增补设计（交易闭环与推荐性能）</h2>
+<h3>15.1 订单状态机</h3>
+<p>合法流转集中声明在 `OrderStatus.nextStates()`：</p>
+<pre><code>待支付 ──→ 已取消
+已支付 ──→ 已发货 / 已取消
+已发货 ──→ 已完成
+已完成、已取消 ──→ 终态</code></pre>
+<p>两个刻意的缺口：「待支付 → 已支付」只能走支付接口（要写支付方式与支付时间）；「已发货 → 已完成」只能走确认收货接口（有 7 天时效门槛）。通用改状态接口（`PUT /admin/orders/{no}/status`）对这两个目标状态显式拒绝，堵住后台绕行。</p>
+<h3>15.2 支付</h3>
+<p>`PayType` 枚举（支付宝/微信/银行卡）+ `POST /api/orders/{orderNo}/pay`。防重复支付依赖状态校验而非幂等键：非待支付订单直接返回 4006。支付成功写 `pay_type`、`paid_time` 并推送站内通知。</p>
+<h3>15.3 发货与物流</h3>
+<p>`Carrier` 枚举持有各快递公司的单号生成规则（前缀 + 位数 + 后缀）：</p>
+<table>
+<tr>
+<th>配送方</th>
+<th>规则</th>
+<th>示例</th>
+</tr>
+<tr>
+<td>顺丰速运</td>
+<td>SF + 13 位数字</td>
+<td>SF0883052085418</td>
+</tr>
+<tr>
+<td>中国邮政</td>
+<td>E + 9 位数字 + CN</td>
+<td>E962724832CN</td>
+</tr>
+<tr>
+<td>中通快递</td>
+<td>75 开头共 12 位</td>
+<td>759987741509</td>
+</tr>
+<tr>
+<td>京东物流</td>
+<td>JD + 12 位数字</td>
+<td>JD833587601020</td>
+</tr>
+</table>
+<p>`POST /api/admin/orders/{no}/ship` 必须选配送方，单号留空则按规则自动生成；通用改状态接口拒绝 SHIPPED 目标，防止单号缺失的发货。</p>
+<h3>15.4 确认收货（三种路径）</h3>
+<table>
+<tr>
+<th>路径</th>
+<th>触发者</th>
+<th>门槛</th>
+</tr>
+<tr>
+<td>`POST /api/orders/{no}/receipt`</td>
+<td>买家</td>
+<td>无（已发货即可）</td>
+</tr>
+<tr>
+<td>定时任务 `OrderAutoReceiptTask`</td>
+<td>SYSTEM</td>
+<td>发货满 `order.auto-receipt-days`（默认 7 天）</td>
+</tr>
+<tr>
+<td>`POST /api/admin/orders/{no}/confirm-receipt`</td>
+<td>管理员</td>
+<td>同样的 7 天门槛，防止提前替买家确认</td>
+</tr>
+</table>
+<p>三条路径的库存回滚/日志写入共用 `OrderService.doCancel`（取消）与状态日志服务（确认）。</p>
+<h3>15.5 定时任务</h3>
+<table>
+<tr>
+<th>任务</th>
+<th>职责</th>
+<th>调度</th>
+</tr>
+<tr>
+<td>`OrderAutoCancelTask`</td>
+<td>取消超时未支付订单并回滚库存</td>
+<td>fixedDelay 5 分钟，阈值 `order.pay-timeout-minutes`（0 关闭）</td>
+</tr>
+<tr>
+<td>`OrderAutoReceiptTask`</td>
+<td>自动确认超时未收货订单</td>
+<td>fixedDelay 30 分钟，阈值 `order.auto-receipt-days`（0 关闭）</td>
+</tr>
+</table>
+<p>均用 `fixedDelay` 而非 `fixedRate`（慢轮次不堆叠）；内部捕获全部异常（任务抛出会终止后续调度）；首延迟留出预热时间，避免启动即批量处理历史数据。</p>
+<h3>15.6 订单状态日志</h3>
+<p>日志写入与状态变更<b>同一事务</b>：日志失败则状态变更一并回滚。理由是「状态变了但查不到谁改的」比「操作失败」更危险。操作者名称存快照，用户改名不影响历史追溯。查询接口 `GET /api/orders/{no}/logs` 做归属校验，管理员越权访问返回 1003。</p>
+<h3>15.7 站内通知</h3>
+<p>`NotificationService.push` 内部捕获全部异常——通知是附带动作，<b>绝不能阻断发货等主流程</b>。已读接口校验归属，读他人通知返回 1004。前端铃铛每 60 秒轮询未读数。</p>
+<h3>15.8 推荐模型缓存</h3>
+<p>改动前每次请求都 `SELECT` 全表行为并重建矩阵，UserCF 再对全部用户算余弦相似度。改动后：</p>
+<ol>
+<li>`UserItemMatrix` 增加自增 `version`，缓存以版本号为键，矩阵重建即整体失效，无需手动清理；</li>
+<li>`UserCFStrategy` 缓存「排序后的邻居列表」——它与 topN/neighborK 无关，只取决于矩阵与用户；</li>
+<li>`buildMatrix` 按 `recommend.matrix-cache-ttl-seconds`（默认 300s）缓存全量与热门窗口两份矩阵，重建超过 300ms 打日志；</li>
+<li>`POST /api/admin/recommend/refresh` 手动清缓存，批量导数据后立即可用。</li>
+</ol>
+<p>实测（5000 商品 / 701 用户 / 25726 行为）：`/recommend/home` 由 367ms 降至 19~23ms；`/recommend/evaluate` 由 1.83s 降至 1.03s。</p>
+<h3>15.9 多样性打散</h3>
+<p>纯按分数排序时，热门类目会霸屏（实测某用户 Top20 中母婴玩具占 11 条）。`diversify` 用贪心配额：逐个挑「分数最高且未超配额」的候选，同一级类目上限 `recommend.diversify-max-per-category`（默认 2）；剩余候选全部超配额时把配额放宽 1 再挑，保证条数不缩水。</p>
+<p><b>第一版缺陷复盘</b>：先收集超配额候选再统一补齐——候选池集中时补齐环节击穿配额（母婴玩具回到 9/20）。教训：配额控制不能用「先扣再补」，必须「不够就放宽」。</p>
+<p>打散只应用于首页与热门列表；相似推荐刻意不做——同品类恰是"相似"的来源。</p>
+<h3>15.10 冷启动</h3>
+<ul>
+<li><b>冷用户</b>（交互商品数 &lt; `recommend.cold-start-min-interactions`，默认 3）：跳过协同过滤（一两个行为推出的邻居是噪声），直接「全站热门 + 类目打散」，理由文案为「全站热门好物，逛得越多推荐越准」。</li>
+<li><b>冷商品</b>（零交互）：ItemCF 无从下手。引擎原会用全站热门补满结果，导致品类补位无法触发；新增 `recommendSimilarRaw` 关闭该补位，由服务层按「同品类热门商品」补位（理由：同品类热门商品），全局热门只作最后兜底。</li>
+</ul></body></html>

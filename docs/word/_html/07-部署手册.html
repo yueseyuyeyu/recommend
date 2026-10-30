@@ -1,0 +1,501 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>07-部署手册</title><style>
+body { font-family: 'Microsoft YaHei', 'SimSun', sans-serif; font-size: 11pt;
+       line-height: 1.6; color: #24292f; margin: 2.5em; }
+h1 { font-size: 20pt; border-bottom: 2px solid #d0d7de; padding-bottom: 6pt; }
+h2 { font-size: 15pt; border-bottom: 1px solid #d8dee4; padding-bottom: 4pt; margin-top: 22pt; }
+h3 { font-size: 13pt; margin-top: 16pt; }
+h4, h5, h6 { font-size: 11.5pt; }
+table { border-collapse: collapse; width: 100%; margin: 8pt 0; }
+th, td { border: 1px solid #b6bec8; padding: 4pt 7pt; font-size: 10pt;
+         vertical-align: top; text-align: left; }
+th { background: #eef1f4; font-weight: bold; }
+code { font-family: Consolas, 'Courier New', monospace; background: #f2f3f5;
+       padding: 0 3px; font-size: 9.5pt; }
+pre { background: #f6f8fa; border: 1px solid #d8dee4; padding: 8pt;
+      font-size: 9.5pt; white-space: pre-wrap; }
+pre code { background: none; padding: 0; }
+blockquote { border-left: 3px solid #ff7a45; background: #fff8f5;
+             margin: 8pt 0; padding: 4pt 10pt; color: #555; }
+li { margin: 2pt 0; }
+hr { border: none; border-top: 1px solid #d0d7de; margin: 14pt 0; }
+a { color: #0969da; text-decoration: none; }
+</style></head><body><h1>07-部署手册</h1><h1>部署手册</h1>
+<table>
+<tr>
+<th>文档信息</th>
+<th>内容</th>
+</tr>
+<tr>
+<td>项目名称</td>
+<td>商品推荐系统（Product Recommendation System）</td>
+</tr>
+<tr>
+<td>文档版本</td>
+<td>v1.0</td>
+</tr>
+<tr>
+<td>文档类型</td>
+<td>部署手册（开发环境 / 单机生产环境）</td>
+</tr>
+<tr>
+<td>适用对象</td>
+<td>本机复现、演示部署、后续容器化改造的基线</td>
+</tr>
+</table>
+<hr/>
+<h2>1. 部署架构</h2>
+<pre><code>┌──────────────┐    /api 反向代理     ┌────────────────────┐      JDBC       ┌──────────────┐
+│  浏览器       │ ───────────────────▶ │  Nginx / Vite 代理  │ ─────────────▶ │ Spring Boot  │
+│ (Vue 3 SPA)  │                      │  (5173 或 80)       │                │   :8080      │
+└──────────────┘                      └────────────────────┘                └──────┬───────┘
+                                                                                    │
+                                                                              ┌─────▼──────┐
+                                                                              │  MySQL 8   │
+                                                                              │ recommend_db│
+                                                                              └────────────┘</code></pre>
+<p>前端为纯静态 SPA，后端为无状态 JWT 服务，两者可分别部署与水平扩展。</p>
+<hr/>
+<h2>2. 环境要求</h2>
+<table>
+<tr>
+<th>组件</th>
+<th>版本要求</th>
+<th>本机路径 / 说明</th>
+</tr>
+<tr>
+<td>JDK</td>
+<td>17（LTS）</td>
+<td>`D:\java17`（17.0.5）</td>
+</tr>
+<tr>
+<td>Maven</td>
+<td>3.9.x</td>
+<td>用仓库自带 Wrapper，无需单独安装</td>
+</tr>
+<tr>
+<td>MySQL</td>
+<td>8.0+</td>
+<td>`D:\mysql\mysql-8.0.27-winx64\bin`</td>
+</tr>
+<tr>
+<td>Node.js</td>
+<td>18+</td>
+<td>本机 `D:\Node\v24.22.1`（构建前端才需要）</td>
+</tr>
+<tr>
+<td>操作系统</td>
+<td>Windows / Linux</td>
+<td>命令示例以 PowerShell 为主</td>
+</tr>
+</table>
+<blockquote><p>本机系统环境变量 `JAVA_HOME` 指向 `D:\java8`，<b>不要修改它</b>； 构建时在当次会话里临时指定 `JAVA_HOME=D:\java17` 即可。</p></blockquote>
+<hr/>
+<h2>3. 配置项（全部走环境变量）</h2>
+<p>后端配置文件 `recommend-server/src/main/resources/application.yml` 中不含任何明文口令与密钥：</p>
+<table>
+<tr>
+<th>环境变量</th>
+<th>必填</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+<tr>
+<td>`DB_HOST`</td>
+<td>否</td>
+<td>`localhost`</td>
+<td>MySQL 主机</td>
+</tr>
+<tr>
+<td>`DB_PORT`</td>
+<td>否</td>
+<td>`3306`</td>
+<td>MySQL 端口</td>
+</tr>
+<tr>
+<td>`DB_NAME`</td>
+<td>否</td>
+<td>`recommend_db`</td>
+<td>库名</td>
+</tr>
+<tr>
+<td>`DB_USERNAME`</td>
+<td>否</td>
+<td>`root`</td>
+<td>数据库账号</td>
+</tr>
+<tr>
+<td>`DB_PASSWORD`</td>
+<td><b>是</b></td>
+<td>无（未注入则启动失败）</td>
+<td>数据库口令，由 `DataSourcePasswordValidator` 在启动阶段校验</td>
+</tr>
+<tr>
+<td>`JWT_SECRET`</td>
+<td><b>是</b></td>
+<td>内置占位值</td>
+<td>签发令牌的密钥，<b>长度 ≥ 32 字节</b>，生产必须覆盖</td>
+</tr>
+<tr>
+<td>`SERVER_PORT`</td>
+<td>否</td>
+<td>`8080`</td>
+<td>后端端口（改 `server.port`）</td>
+</tr>
+</table>
+<p>推荐做法：在项目根目录建 `.env`（已在 `.gitignore` 中忽略，模板见 `.env.example`）， 或直接在运行配置/启动脚本里注入。</p>
+<p>推荐算法参数（`recommend.*`）见 `application.yml`，常用项：</p>
+<table>
+<tr>
+<th>参数</th>
+<th>默认</th>
+<th>含义</th>
+</tr>
+<tr>
+<td>`default-top-n`</td>
+<td>10</td>
+<td>推荐位默认条数</td>
+</tr>
+<tr>
+<td>`neighbor-k`</td>
+<td>20</td>
+<td>近邻数量 K</td>
+</tr>
+<tr>
+<td>`popularity-penalty`</td>
+<td>0.0</td>
+<td>ItemCF 热门惩罚因子 α</td>
+</tr>
+<tr>
+<td>`user-cf-weight`</td>
+<td>0.6</td>
+<td>混合推荐中 UserCF 权重</td>
+</tr>
+<tr>
+<td>`item-cf-weight`</td>
+<td>0.4</td>
+<td>混合推荐中 ItemCF 权重</td>
+</tr>
+<tr>
+<td>`hot-days`</td>
+<td>30</td>
+<td>热门统计时间窗口（天）</td>
+</tr>
+<tr>
+<td>`enable-cache`</td>
+<td>true</td>
+<td>是否缓存推荐结果</td>
+</tr>
+<tr>
+<td>`cache-ttl-seconds`</td>
+<td>1800</td>
+<td>缓存有效期</td>
+</tr>
+</table>
+<hr/>
+<h2>4. 数据库初始化</h2>
+<h3>4.1 建库建表</h3>
+<pre><code>cd D:\桌面\商品推荐系统
+&amp; &quot;D:\mysql\mysql-8.0.27-winx64\bin\mysql.exe&quot; -u root -p `
+    --default-character-set=utf8mb4 -e &quot;source sql/schema.sql&quot;</code></pre>
+<p>`schema.sql` 会创建库 `recommend_db`（utf8mb4）与 8 张表、17 个索引。 脚本内含 `DROP TABLE IF EXISTS`，<b>重复执行会清空数据</b>。</p>
+<h3>4.2 灌演示数据（两种方式，二选一）</h3>
+<p><b>方式 A：纯 SQL（推荐，无需编译后端）</b></p>
+<pre><code>&amp; &quot;D:\mysql\mysql-8.0.27-winx64\bin\mysql.exe&quot; -u root -p `
+    --default-character-set=utf8mb4 recommend_db -e &quot;source sql/seed.sql&quot;</code></pre>
+<blockquote><p>命令行提示 `Access denied` 时不要反复重试：如果 IDEA 的 Database 面板能连上库， 直接对 `recommend_db` 右键「Run SQL Script」选 `sql/seed.sql` 执行，效果完全一样。</p></blockquote>
+<p>注意：`seed.sql` 使用了<b>临时表</b>做数字序列生成，必须在同一个连接里整文件执行 （IDEA 用「Execute script / 执行脚本」，命令行用 `source`），不要拆成单条语句执行。</p>
+<p>执行完会输出 8 行自检结果，正常应为 `category 40 / user 201 / product 500 / behavior 5000 / orders 800 / order_item ~1600 / review 600 / cart 3`。</p>
+<p><b>方式 B：Java 生成器（可自定义规模）</b></p>
+<pre><code>cd recommend-server
+$env:JAVA_HOME = &#x27;D:\java17&#x27;
+$env:DB_PASSWORD = &#x27;你的数据库口令&#x27;
+.\mvnw.cmd exec:java &quot;-Dexec.args=--reset&quot;          # 默认 200 用户 / 500 商品 / 5000 行为 / 800 单 / 600 评价
+.\mvnw.cmd exec:java &quot;-Dexec.args=--reset --users=50 --products=100&quot;</code></pre>
+<p>两种方式都会清空 8 张业务表后重建，<b>不要对着生产库执行</b>。</p>
+<h3>4.3 演示账号</h3>
+<table>
+<tr>
+<th>角色</th>
+<th>用户名</th>
+<th>口令</th>
+<th>说明</th>
+</tr>
+<tr>
+<td>管理员</td>
+<td>`admin`</td>
+<td>`admin123`</td>
+<td>后台 `/admin`</td>
+</tr>
+<tr>
+<td>普通用户</td>
+<td>`user001`</td>
+<td>`123456`</td>
+<td>演示个性化推荐</td>
+</tr>
+</table>
+<p>口令在库中以 BCrypt(10) 哈希存储，登录时由 `BCryptPasswordEncoder` 校验。</p>
+<hr/>
+<h2>5. 后端部署</h2>
+<h3>5.1 开发模式启动</h3>
+<pre><code>cd D:\桌面\商品推荐系统\recommend-server
+$env:JAVA_HOME    = &#x27;D:\java17&#x27;
+$env:DB_PASSWORD  = &#x27;你的数据库口令&#x27;
+$env:JWT_SECRET   = -join ((1..48) | ForEach-Object { [char](Get-Random -Min 33 -Max 126) })
+.\mvnw.cmd spring-boot:run</code></pre>
+<h3>5.2 打包与运行 jar（单机生产）</h3>
+<pre><code>cd D:\桌面\商品推荐系统\recommend-server
+$env:JAVA_HOME = &#x27;D:\java17&#x27;
+.\mvnw.cmd -B clean package          # 产出 target/recommend-server-1.0.0.jar
+
+$env:DB_PASSWORD = &#x27;你的数据库口令&#x27;
+$env:JWT_SECRET  = -join ((1..48) | ForEach-Object { [char](Get-Random -Min 33 -Max 126) })
+java -jar target\recommend-server-1.0.0.jar --server.port=8080</code></pre>
+<p>Linux 下建议用 systemd 托管：</p>
+<pre><code>[Unit]
+Description=recommend-server
+After=network.target mysql.service
+
+[Service]
+User=app
+WorkingDirectory=/opt/recommend
+Environment=DB_HOST=127.0.0.1
+Environment=DB_NAME=recommend_db
+Environment=DB_USERNAME=recommend
+Environment=DB_PASSWORD=__从密钥管理注入__
+Environment=JWT_SECRET=__从密钥管理注入__
+ExecStart=/usr/bin/java -Xms512m -Xmx1g -jar /opt/recommend/recommend-server-1.0.0.jar
+Restart=always
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+<h3>5.3 启动验证</h3>
+<table>
+<tr>
+<th>检查项</th>
+<th>方式</th>
+<th>期望</th>
+</tr>
+<tr>
+<td>端口监听</td>
+<td>`netstat -ano \</td>
+<td>findstr :8080`</td>
+</tr>
+<tr>
+<td>接口文档</td>
+<td>浏览器打开 `http://localhost:8080/swagger-ui.html`</td>
+<td>正常渲染接口列表</td>
+</tr>
+<tr>
+<td>公开接口</td>
+<td>`GET http://localhost:8080/api/recommend/hot?topN=3`</td>
+<td>返回 `code=0` 与 3 条商品</td>
+</tr>
+<tr>
+<td>登录</td>
+<td>`POST /api/auth/login`，body `{"username":"user001","password":"123456"}`</td>
+<td>返回 `token`</td>
+</tr>
+<tr>
+<td>鉴权生效</td>
+<td>不带 token 访问 `GET /api/cart`</td>
+<td>返回 `code=1002`（未登录）</td>
+</tr>
+<tr>
+<td>健康检查</td>
+<td>`GET http://localhost:8080/actuator/health`（无需 token）</td>
+<td>返回 `{"status":"UP"}`</td>
+</tr>
+<tr>
+<td>暴露面收紧</td>
+<td>不带 token 访问 `GET /actuator/env`</td>
+<td>返回 `code=1002`，不能读到环境变量</td>
+</tr>
+<tr>
+<td>推荐可用</td>
+<td>带 token 访问 `GET /api/recommend/home?topN=5`</td>
+<td>返回 5 条推荐，含推荐理由</td>
+</tr>
+</table>
+<hr/>
+<h2>6. 前端部署</h2>
+<h3>6.1 开发模式（热更新）</h3>
+<pre><code>cd D:\桌面\商品推荐系统\recommend-web
+npm.cmd install          # 首次
+npm.cmd run dev          # http://localhost:5173，/api 已代理到 8080</code></pre>
+<blockquote><p>PowerShell 若提示「禁止运行脚本」，用 `npm.cmd` 而不是 `npm`。</p></blockquote>
+<h3>6.2 生产构建</h3>
+<pre><code>cd D:\桌面\商品推荐系统\recommend-web
+npm.cmd install
+npm.cmd run build        # 产物在 dist/</code></pre>
+<h3>6.3 Nginx 静态托管 + 反向代理</h3>
+<pre><code>server {
+    listen       80;
+    server_name  recommend.example.com;
+
+    root  /opt/recommend-web/dist;
+    index index.html;
+
+    # SPA history 路由：找不到文件时回落到 index.html
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # 后端接口
+    location /api/ {
+        proxy_pass         http://127.0.0.1:8080/api/;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+
+    # 静态资源长缓存（文件名带 hash）
+    location /assets/ {
+        expires 30d;
+        add_header Cache-Control &quot;public, immutable&quot;;
+    }
+}</code></pre>
+<h3>6.4 交接注意事项</h3>
+<ul>
+<li>后端开启了 CORS（`CorsConfig`，默认允许 `localhost:5173`）。走 Nginx 同源代理时不会触发跨域；</li>
+</ul>
+<p>若前后端分域部署，需要把前端域名加入 `CorsConfig` 的白名单。</p>
+<ul>
+<li>前端 `api/http.js` 的 `baseURL` 固定为 `/api`，因此<b>必须</b>由代理转发，不允许直连 8080。</li>
+</ul>
+<hr/>
+<h2>7. 常见问题（FAQ）</h2>
+<table>
+<tr>
+<th>现象</th>
+<th>原因与处理</th>
+</tr>
+<tr>
+<td>启动报 `数据库口令未注入：请通过环境变量 DB_PASSWORD ...`</td>
+<td>未注入 `DB_PASSWORD`；`application.yml` 里口令不留默认值，`DataSourcePasswordValidator` 会在启动阶段直接拦下</td>
+</tr>
+<tr>
+<td>启动报 `Access denied for user 'root'`</td>
+<td>`DB_PASSWORD` 值错误（口令含特殊字符时需加引号），或 MySQL 账号无该库权限</td>
+</tr>
+<tr>
+<td>启动报 `JWT 密钥长度不足` / `WeakKeyException`</td>
+<td>`JWT_SECRET` 不足 32 字节（<b>中文按 3 字节计</b>，11 个汉字才 33 字节且实际 29 字节）；改用 48 位 ASCII 随机串，见 5.1 的命令</td>
+</tr>
+<tr>
+<td>`mysql` 命令行报 `Access denied ... (using password: YES)`，但 IDEA 里能连</td>
+<td>命令行口令输错，或客户端编码/粘贴带入特殊字符；直接在 IDEA 的 Database 面板对 `recommend_db` 右键「Run SQL Script」执行 `seed.sql`</td>
+</tr>
+<tr>
+<td>启动报 `Unknown database 'recommend_db'`</td>
+<td>未执行 `sql/schema.sql`</td>
+</tr>
+<tr>
+<td>登录后立刻 401</td>
+<td>`JWT_SECRET` 在两次启动间发生变化，导致旧令牌失效；固定该变量</td>
+</tr>
+<tr>
+<td>前台商品列表为空</td>
+<td>数据未灌（执行 `seed.sql`）；或商品全部被下架</td>
+</tr>
+<tr>
+<td>首页「为你推荐」为空</td>
+<td>该用户无行为数据，属冷启动，接口会以热门兜底；检查 `behavior` 表是否有该用户数据</td>
+</tr>
+<tr>
+<td>中文乱码</td>
+<td>客户端连接未用 utf8mb4：加 `--default-character-set=utf8mb4`；IDEA 控制台编码设为 UTF-8</td>
+</tr>
+<tr>
+<td>`seed.sql` 执行报 `Table 'tmp_seq' doesn't exist`</td>
+<td>拆成单条语句执行导致临时表随会话丢失；请整文件执行</td>
+</tr>
+<tr>
+<td>`mvnw` 无法下载依赖</td>
+<td>检查本机 `settings.xml` 的阿里云镜像与本地仓库 `D:\maven-repo` 是否存在</td>
+</tr>
+<tr>
+<td>前端 `npm run build` 提示 chunk &gt; 500 kB</td>
+<td>仅告警（element-plus 全量引入），不影响运行；需要可改按需引入</td>
+</tr>
+</table>
+<hr/>
+<h2>8. 升级与回滚</h2>
+<ol>
+<li>代码升级：`git pull` → `mvnw -B clean package` → 替换 jar → 重启服务。</li>
+<li>表结构升级：新变更先写入 `sql/schema.sql`（保持与代码同版本），生产环境用增量脚本执行，</li>
+</ol>
+<p><b>禁止</b>直接对生产库执行 `schema.sql`（含 `DROP TABLE`）。</p>
+<ol>
+<li>回滚：保留上一版本 jar 与数据库备份（`mysqldump -u root -p recommend_db &gt; backup.sql`），</li>
+</ol>
+<p>回滚时先停服务 → 还原库 → 换回旧 jar → 启动 → 按 5.3 验证。</p>
+<hr/>
+<h2>9. 安全检查清单</h2>
+<ul>
+<li>[ ] `DB_PASSWORD`、`JWT_SECRET` 未写入任何入库文件（`.env` 已被 `.gitignore` 忽略）</li>
+<li>[ ] `JWT_SECRET` 长度 ≥ 32 字节且为随机值（不是内置占位串）</li>
+<li>[ ] 生产库账号不是 `root`，只授予 `recommend_db` 的增删改查权限</li>
+<li>[ ] 数据库端口未对公网开放</li>
+<li>[ ] Nginx 只暴露 80/443，8080 与 3306 仅本机可达</li>
+<li>[ ] Actuator 仅暴露 `health,info`（`management.endpoints.web.exposure.include`），`env`、`configprops`、`heapdump` 绝不对公网开放</li>
+<li>[ ] 如需监控采集，把管理端点绑到独立端口（`management.server.port`）并仅对本机/内网放行</li>
+<li>[ ] Swagger 在生产环境按需关闭（`springdoc.api-docs.enabled=false`）</li>
+</ul>
+<h2>10. 增量升级指南（V6 ~ V10）</h2>
+<h3>10.1 老库升级步骤</h3>
+<p>按序执行（必须带 `--default-character-set=utf8mb4`）：</p>
+<pre><code>mysql --default-character-set=utf8mb4 -u root -p recommend_db &lt; sql/migration/V6__order_pay_type.sql
+mysql --default-character-set=utf8mb4 -u root -p recommend_db &lt; sql/migration/V7__order_tracking_no.sql
+mysql --default-character-set=utf8mb4 -u root -p recommend_db &lt; sql/migration/V8__order_log_notification.sql
+mysql --default-character-set=utf8mb4 -u root -p recommend_db &lt; sql/migration/V9__order_ship_info.sql
+mysql --default-character-set=utf8mb4 -u root -p recommend_db &lt; sql/migration/V10__bulk_demo_data.sql   # 可选：批量演示数据</code></pre>
+<p>V10 会额外生成 4500 商品 / 500 用户 / 2 万+行为，并把原 500 个「演示商品」按类目重命名与重定价。不需要该数据可跳过；已导入可用文件头注释里的 id 区间语句精确回滚。</p>
+<h3>10.2 新增配置项</h3>
+<table>
+<tr>
+<th>配置</th>
+<th>默认</th>
+<th>说明</th>
+</tr>
+<tr>
+<td>`order.pay-timeout-minutes`</td>
+<td>30</td>
+<td>超时未支付自动取消阈值；0 关闭</td>
+</tr>
+<tr>
+<td>`order.auto-cancel-interval-ms`</td>
+<td>300000</td>
+<td>自动取消扫描间隔</td>
+</tr>
+<tr>
+<td>`order.auto-receipt-days`</td>
+<td>7</td>
+<td>发货满 N 天自动确认收货；0 关闭，且管理员可随时确认</td>
+</tr>
+<tr>
+<td>`order.auto-receipt-interval-ms`</td>
+<td>1800000</td>
+<td>自动确认扫描间隔</td>
+</tr>
+<tr>
+<td>`recommend.matrix-cache-ttl-seconds`</td>
+<td>300</td>
+<td>行为矩阵缓存时长；0 关闭（每次重建）</td>
+</tr>
+<tr>
+<td>`recommend.diversify-max-per-category`</td>
+<td>2</td>
+<td>推荐同一级类目上限；0 关闭打散</td>
+</tr>
+<tr>
+<td>`recommend.cold-start-min-interactions`</td>
+<td>3</td>
+<td>冷启动判定阈值</td>
+</tr>
+</table>
+<h3>10.3 上传目录注意</h3>
+<p>`app.upload-dir` 相对<b>进程工作目录</b>解析：IDEA 运行落在项目根 `/uploads`，命令行在 `recommend-server` 下运行落在模块内 `/uploads`。两种方式混用会导致旧头像 404。启动日志会打印解析后的绝对路径；生产建议设绝对路径（环境变量 `UPLOAD_DIR`）。</p>
+<h3>10.4 前端代理</h3>
+<p>Vite 开发代理现已同时转发 `/api` 与 `/uploads`。若使用自定义 dev 配置，漏掉 `/uploads` 会使头像上传后「提示成功但显示不更新」（图片请求落到 dev server 返回 index.html，`el-avatar` 静默回退首字）。</p></body></html>

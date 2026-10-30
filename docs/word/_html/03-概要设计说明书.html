@@ -1,0 +1,761 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>03-概要设计说明书</title><style>
+body { font-family: 'Microsoft YaHei', 'SimSun', sans-serif; font-size: 11pt;
+       line-height: 1.6; color: #24292f; margin: 2.5em; }
+h1 { font-size: 20pt; border-bottom: 2px solid #d0d7de; padding-bottom: 6pt; }
+h2 { font-size: 15pt; border-bottom: 1px solid #d8dee4; padding-bottom: 4pt; margin-top: 22pt; }
+h3 { font-size: 13pt; margin-top: 16pt; }
+h4, h5, h6 { font-size: 11.5pt; }
+table { border-collapse: collapse; width: 100%; margin: 8pt 0; }
+th, td { border: 1px solid #b6bec8; padding: 4pt 7pt; font-size: 10pt;
+         vertical-align: top; text-align: left; }
+th { background: #eef1f4; font-weight: bold; }
+code { font-family: Consolas, 'Courier New', monospace; background: #f2f3f5;
+       padding: 0 3px; font-size: 9.5pt; }
+pre { background: #f6f8fa; border: 1px solid #d8dee4; padding: 8pt;
+      font-size: 9.5pt; white-space: pre-wrap; }
+pre code { background: none; padding: 0; }
+blockquote { border-left: 3px solid #ff7a45; background: #fff8f5;
+             margin: 8pt 0; padding: 4pt 10pt; color: #555; }
+li { margin: 2pt 0; }
+hr { border: none; border-top: 1px solid #d0d7de; margin: 14pt 0; }
+a { color: #0969da; text-decoration: none; }
+</style></head><body><h1>03-概要设计说明书</h1><h1>概要设计说明书</h1>
+<table>
+<tr>
+<th>文档信息</th>
+<th>内容</th>
+</tr>
+<tr>
+<td>项目名称</td>
+<td>商品推荐系统（Product Recommendation System）</td>
+</tr>
+<tr>
+<td>文档版本</td>
+<td>v1.0</td>
+</tr>
+<tr>
+<td>文档类型</td>
+<td>概要设计说明书</td>
+</tr>
+<tr>
+<td>撰写日期</td>
+<td>2026-10-27</td>
+</tr>
+</table>
+<hr/>
+<h2>1. 引言</h2>
+<h3>1.1 编写目的</h3>
+<p>本文档定义系统的总体架构、模块划分、技术选型、数据库概念模型与接口规范， 为详细设计与编码实现提供顶层设计依据。</p>
+<h3>1.2 参考文档</h3>
+<ul>
+<li>《软件需求规格说明书》`docs/markdown/02-需求规格说明书.md`</li>
+<li>《数据库设计说明书》`docs/markdown/05-数据库设计说明书.md`</li>
+</ul>
+<hr/>
+<h2>2. 总体架构设计</h2>
+<h3>2.1 架构风格</h3>
+<p>系统采用 <b>B/S 前后端分离架构</b>，后端为分层单体应用（Layered Monolith）， 前端为单页应用（SPA）。选择单体而非微服务的原因： 本项目为个人项目，业务边界清晰、部署运维成本敏感， 单体架构足以支撑需求且能显著降低复杂度，符合「合适优于时髦」的工程原则。</p>
+<h3>2.2 系统架构图</h3>
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│                        客户端层                              │
+│   Vue 3 + Element Plus + Vite (SPA)                          │
+│   ┌─────────┬─────────┬─────────┬─────────┬─────────┐       │
+│   │  首页/   │  商品    │  购物车  │  订单    │  后台    │      │
+│   │  推荐位  │  详情    │         │         │  管理    │      │
+│   └─────────┴─────────┴─────────┴─────────┴─────────┘       │
+│        Axios + Pinia 状态管理 + Vue Router                    │
+└────────────────────────────┬────────────────────────────────┘
+                             │ HTTP / JSON (JWT Bearer)
+┌────────────────────────────┴────────────────────────────────┐
+│                     接入层 (Controller)                      │
+│   统一响应体 Result&lt;T&gt; │ 全局异常处理 │ 参数校验 │ CORS │ JWT过滤器 │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+┌────────────────────────────┴────────────────────────────────┐
+│                     业务层 (Service)                         │
+│  ┌──────────┬──────────┬──────────┬──────────┬──────────┐   │
+│  │  Auth    │ Product  │ Behavior │  Order   │  Admin   │   │
+│  │ Service  │ Service  │ Service  │ Service  │ Service  │   │
+│  └──────────┴──────────┴──────────┴──────────┴──────────┘   │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │            推荐引擎 (RecommendEngine) ★核心           │   │
+│  │  ┌────────────┐ ┌────────────┐ ┌──────────────────┐  │   │
+│  │  │  UserCF    │ │  ItemCF    │ │  HotFallback     │  │   │
+│  │  │  策略      │ │  策略      │ │  (冷启动兜底)    │  │   │
+│  │  └────────────┘ └────────────┘ └──────────────────┘  │   │
+│  │        ↑ 策略模式：RecommendStrategy 统一接口         │   │
+│  │  ┌──────────────────────────────────────────────┐   │   │
+│  │  │  Similarity(余弦) │ 评估器 Evaluator │ 缓存   │   │   │
+│  │  └──────────────────────────────────────────────┘   │   │
+│  └──────────────────────────────────────────────────────┘   │
+│        @Transactional 声明式事务                              │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+┌────────────────────────────┴────────────────────────────────┐
+│                   数据访问层 (Mapper)                        │
+│        MyBatis-Plus BaseMapper │ 参数化 SQL │ 逻辑删除        │
+│                    HikariCP 连接池                           │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+┌────────────────────────────┴────────────────────────────────┐
+│                      数据存储层                              │
+│              MySQL 8.0  (schema: recommend_db)              │
+└─────────────────────────────────────────────────────────────┘</code></pre>
+<h3>2.3 分层职责与依赖规则</h3>
+<table>
+<tr>
+<th>层次</th>
+<th>职责</th>
+<th>依赖方向</th>
+</tr>
+<tr>
+<td>Controller</td>
+<td>接收 HTTP 请求、参数校验、调用 Service、封装响应</td>
+<td>→ Service</td>
+</tr>
+<tr>
+<td>Service</td>
+<td>业务逻辑编排、事务控制、权限校验、调用 Mapper 与推荐引擎</td>
+<td>→ Mapper</td>
+</tr>
+<tr>
+<td>Recommend</td>
+<td>推荐算法核心：相似度计算、召回、排序、兜底</td>
+<td>→ Mapper（只读）</td>
+</tr>
+<tr>
+<td>Mapper</td>
+<td>数据持久化，SQL 参数化，实体映射</td>
+<td>→ DB</td>
+</tr>
+<tr>
+<td>Entity/DTO</td>
+<td>数据载体，Entity 对应表，DTO 用于层间传输，VO 用于前端展示</td>
+<td>无依赖</td>
+</tr>
+</table>
+<p><b>强制规则：</b></p>
+<ul>
+<li>禁止 Controller 直接调用 Mapper（无 Service 中转）。</li>
+<li>禁止 Service 反向依赖 Controller。</li>
+<li>禁止在 Controller 中编写业务逻辑。</li>
+<li>跨层数据一律使用 DTO/VO，禁止直接暴露 Entity 给前端。</li>
+</ul>
+<hr/>
+<h2>3. 技术选型</h2>
+<h3>3.1 后端技术栈</h3>
+<table>
+<tr>
+<th>组件</th>
+<th>选型</th>
+<th>版本</th>
+<th>选型理由</th>
+</tr>
+<tr>
+<td>基础框架</td>
+<td>Spring Boot</td>
+<td>3.2.x</td>
+<td>生态成熟、自动配置、内置容器，社区活跃</td>
+</tr>
+<tr>
+<td>JDK</td>
+<td>Eclipse Temurin</td>
+<td>17</td>
+<td>Spring Boot 3 的最低要求，LTS 版本</td>
+</tr>
+<tr>
+<td>持久层</td>
+<td>MyBatis-Plus</td>
+<td>3.5.x</td>
+<td>单表 CRUD 零 SQL，分页插件，逻辑删除支持</td>
+</tr>
+<tr>
+<td>连接池</td>
+<td>HikariCP</td>
+<td>内置</td>
+<td>Spring Boot 默认，性能最优</td>
+</tr>
+<tr>
+<td>数据库</td>
+<td>MySQL</td>
+<td>8.0+</td>
+<td>本机已装 8.0.27，广泛支持</td>
+</tr>
+<tr>
+<td>安全</td>
+<td>Spring Security + JWT</td>
+<td>6.x</td>
+<td>标准鉴权方案，BCrypt 密码哈希</td>
+</tr>
+<tr>
+<td>参数校验</td>
+<td>Jakarta Validation</td>
+<td>3.x</td>
+<td>声明式校验，减少样板代码</td>
+</tr>
+<tr>
+<td>接口文档</td>
+<td>SpringDoc OpenAPI</td>
+<td>2.x</td>
+<td>自动生成 Swagger UI，与 Spring Boot 3 兼容</td>
+</tr>
+<tr>
+<td>JSON</td>
+<td>Jackson</td>
+<td>内置</td>
+<td>Spring Boot 默认</td>
+</tr>
+<tr>
+<td>日志</td>
+<td>Slf4j + Logback</td>
+<td>内置</td>
+<td>标准日志门面 + 实现</td>
+</tr>
+<tr>
+<td>构建</td>
+<td>Maven + Maven Wrapper</td>
+<td>3.9.x</td>
+<td>无需预装 Maven，版本一致</td>
+</tr>
+<tr>
+<td>测试</td>
+<td>JUnit 5 + Mockito + H2</td>
+<td>—</td>
+<td>标准测试框架，H2 内存库隔离数据库依赖</td>
+</tr>
+</table>
+<h3>3.2 前端技术栈</h3>
+<table>
+<tr>
+<th>组件</th>
+<th>选型</th>
+<th>选型理由</th>
+</tr>
+<tr>
+<td>框架</td>
+<td>Vue 3</td>
+<td>组合式 API，响应式系统，上手快</td>
+</tr>
+<tr>
+<td>UI 组件库</td>
+<td>Element Plus</td>
+<td>Vue 3 生态最完善的组件库，中文文档友好</td>
+</tr>
+<tr>
+<td>构建</td>
+<td>Vite</td>
+<td>启动快，热更新迅速</td>
+</tr>
+<tr>
+<td>路由</td>
+<td>Vue Router 4</td>
+<td>官方路由方案</td>
+</tr>
+<tr>
+<td>状态管理</td>
+<td>Pinia</td>
+<td>Vue 3 官方推荐，替代 Vuex</td>
+</tr>
+<tr>
+<td>HTTP 客户端</td>
+<td>Axios</td>
+<td>拦截器统一处理 Token 与错误</td>
+</tr>
+</table>
+<h3>3.3 与参考项目技术栈对照</h3>
+<table>
+<tr>
+<th>维度</th>
+<th>参考项目</th>
+<th>本项目</th>
+</tr>
+<tr>
+<td>界面</td>
+<td>Thymeleaf 服务端渲染</td>
+<td>Vue 3 + Element Plus 响应式</td>
+</tr>
+<tr>
+<td>架构</td>
+<td>C/S 单机</td>
+<td>B/S 前后端分离</td>
+</tr>
+<tr>
+<td>持久层</td>
+<td>裸 JDBC，手工管理连接</td>
+<td>MyBatis-Plus + HikariCP</td>
+</tr>
+<tr>
+<td>依赖管理</td>
+<td>手工拷贝 jar 到 `lib/`</td>
+<td>Maven 声明式依赖</td>
+</tr>
+<tr>
+<td>构建</td>
+<td>Eclipse 手工编译</td>
+<td>Maven Wrapper 一键构建</td>
+</tr>
+<tr>
+<td>安全</td>
+<td>明文密码</td>
+<td>Spring Security + BCrypt + JWT</td>
+</tr>
+<tr>
+<td>事务</td>
+<td>无</td>
+<td>`@Transactional`</td>
+</tr>
+<tr>
+<td>日志</td>
+<td>`e.printStackTrace()`</td>
+<td>Slf4j + Logback</td>
+</tr>
+<tr>
+<td>测试</td>
+<td>无</td>
+<td>JUnit 5 + Mockito + H2</td>
+</tr>
+</table>
+<hr/>
+<h2>4. 模块设计</h2>
+<h3>4.1 后端模块结构</h3>
+<pre><code>com.deng.recommend
+├── RecommendApplication.java          启动类
+├── common/                            通用层
+│   ├── Result.java                    统一响应体
+│   ├── ResultCode.java                错误码枚举
+│   ├── BusinessException.java         业务异常
+│   ├── GlobalExceptionHandler.java    全局异常处理
+│   └── PageResult.java                分页响应封装
+├── config/                            配置层
+│   ├── SecurityConfig.java            安全配置
+│   ├── CorsConfig.java                跨域配置
+│   ├── MybatisPlusConfig.java         分页/逻辑删除配置
+│   ├── OpenApiConfig.java             Swagger 配置
+│   └── RecommendProperties.java       推荐参数配置
+├── security/                          安全层
+│   ├── JwtTokenProvider.java          JWT 签发与校验
+│   ├── JwtAuthenticationFilter.java   JWT 过滤器
+│   └── UserPrincipal.java             登录主体
+├── controller/                        接入层
+│   ├── AuthController.java
+│   ├── ProductController.java
+│   ├── CategoryController.java
+│   ├── BehaviorController.java
+│   ├── RecommendController.java
+│   ├── CartController.java
+│   ├── OrderController.java
+│   ├── ReviewController.java
+│   └── admin/AdminController.java
+├── service/                           业务层
+│   ├── AuthService.java / impl
+│   ├── ProductService.java / impl
+│   ├── CategoryService.java / impl
+│   ├── BehaviorService.java / impl
+│   ├── CartService.java / impl
+│   ├── OrderService.java / impl
+│   ├── ReviewService.java / impl
+│   └── RecommendService.java / impl
+├── recommend/                         推荐引擎 ★
+│   ├── RecommendStrategy.java         策略接口
+│   ├── UserCFStrategy.java            基于用户的协同过滤
+│   ├── ItemCFStrategy.java            基于物品的协同过滤
+│   ├── HotFallbackStrategy.java       热门兜底
+│   ├── HybridStrategy.java            混合推荐
+│   ├── RecommendEngine.java           引擎门面（策略路由）
+│   ├── similarity/CosineSimilarity.java 余弦相似度（静态工具类）
+│   ├── model/UserItemMatrix.java      用户-物品行为矩阵
+│   ├── model/ScoredItem.java          带分商品
+│   └── evaluator/RecommendEvaluator.java 离线评测
+├── mapper/                            数据访问层
+│   ├── UserMapper.java
+│   ├── ProductMapper.java
+│   ├── CategoryMapper.java
+│   ├── BehaviorMapper.java
+│   ├── CartMapper.java
+│   ├── OrderMapper.java
+│   ├── OrderItemMapper.java
+│   └── ReviewMapper.java
+├── entity/                            实体层（对应表）
+│   ├── User.java  Product.java  Category.java
+│   ├── Behavior.java  Cart.java  Order.java
+│   ├── OrderItem.java  Review.java
+│   └── enums/UserRole.java  BehaviorType.java
+│                                        OrderStatus.java
+├── dto/                               传输对象
+│   ├── LoginRequest.java  RegisterRequest.java
+│   ├── ProductQuery.java  BehaviorReportRequest.java
+│   ├── CartAddRequest.java  OrderCreateRequest.java
+│   └── ...
+└── vo/                                视图对象
+    ├── UserVO.java  ProductVO.java
+    ├── RecommendVO.java  OrderVO.java
+    └── ...</code></pre>
+<h3>4.2 推荐引擎设计（核心）</h3>
+<h4>4.2.1 策略模式结构</h4>
+<pre><code>        RecommendStrategy (接口)
+         ├── recommend(userId, itemId, n) → List&lt;ScoredItem&gt;
+         │
+    ┌────┴─────┬──────────┬───────────┐
+ UserCF     ItemCF    HotFallback  Hybrid
+ Strategy   Strategy   Strategy    Strategy</code></pre>
+<p>引擎门面 `RecommendEngine` 根据场景路由到具体策略：</p>
+<table>
+<tr>
+<th>场景</th>
+<th>使用策略</th>
+</tr>
+<tr>
+<td>首页推荐</td>
+<td>UserCF（失败降级 HotFallback）</td>
+</tr>
+<tr>
+<td>详情页相似</td>
+<td>ItemCF（失败降级同类目热门）</td>
+</tr>
+<tr>
+<td>游客首页</td>
+<td>HotFallback</td>
+</tr>
+<tr>
+<td>猜你喜欢</td>
+<td>Hybrid（UserCF 0.6 + ItemCF 0.4）</td>
+</tr>
+</table>
+<h4>4.2.2 UserCF 算法流程</h4>
+<pre><code>输入：目标用户 u，邻居数 K，推荐数 N
+1. 加载全量有效行为，构建 用户→(商品→加权分) 映射
+2. 对 u 与其余每个用户 v 计算余弦相似度：
+       sim(u,v) = Σ(i∈Iuv) w(u,i)·w(v,i)
+                  ───────────────────────
+                  √Σ(i∈Iu)w(u,i)² · √Σ(i∈Iv)w(v,i)²
+   其中 Iuv 为 u、v 共同交互过的商品集合，w 为行为加权分
+3. 取 sim 最大的 K 个用户作为邻居集合 S(u,K)
+4. 对候选商品 i（邻居交互过、u 未交互过、未下架）打分：
+       score(u,i) = Σ(v∈S(u,K) ∩ N(i)) sim(u,v) · w(v,i)
+   其中 N(i) 为对 i 有过行为的用户集合
+5. 按 score 降序取 Top-N
+6. 候选不足则用 HotFallback 补足</code></pre>
+<h4>4.2.3 ItemCF 算法流程</h4>
+<pre><code>输入：目标商品 i，推荐数 N
+1. 构建 商品→(用户→加权分) 倒排索引
+2. 计算物品 i 与物品 j 的余弦相似度（含热门惩罚）：
+                    |N(i) ∩ N(j)|
+       sim(i,j) = ─────────────────
+                  √|N(i)| · |N(j)|
+   热门惩罚：对 |N(i)| 过大的物品降低权重，避免热门物品与万物相似
+3. 取 sim 最大的 Top-N 个商品（排除自身、已下架、用户已购）
+4. 按相似度降序输出</code></pre>
+<h4>4.2.4 冷启动策略</h4>
+<table>
+<tr>
+<th>场景</th>
+<th>策略</th>
+</tr>
+<tr>
+<td>新用户（无行为）</td>
+<td>返回近 30 天加权热门商品 Top-N</td>
+</tr>
+<tr>
+<td>新商品（无行为）</td>
+<td>返回同二级类目下热门商品</td>
+</tr>
+<tr>
+<td>候选不足</td>
+<td>用热门商品补足至 N 个</td>
+</tr>
+<tr>
+<td>引擎异常</td>
+<td>捕获异常、记录日志、降级返回热门商品，保证页面可用性</td>
+</tr>
+</table>
+<hr/>
+<h2>5. 数据库概念设计</h2>
+<h3>5.1 实体关系（ER）概览</h3>
+<pre><code>┌──────────┐      1:N      ┌──────────┐
+│ Category │──────────────▶│ Product  │
+└──────────┘               └────┬─────┘
+                                │
+        ┌───────────────────────┼───────────────────────┐
+        │ 1:N                   │ 1:N                   │ 1:N
+        ▼                       ▼                       ▼
+┌──────────────┐      ┌──────────────┐        ┌──────────────┐
+│   Behavior   │      │     Cart     │        │  OrderItem   │
+└──────┬───────┘      └──────┬───────┘        └──────┬───────┘
+       │ N:1                 │ N:1                   │ N:1
+       │                     │                       ▼
+       │                     │              ┌──────────────┐
+       │                     │              │    Order     │
+       │                     │              └──────┬───────┘
+       │                     │                     │ N:1
+       │    ┌────────────────┴─────────────────────┴──┐
+       │    │                                          │
+       ▼    ▼                                          ▼
+┌──────────────────┐                          ┌──────────────┐
+│       User       │──────────1:N────────────▶│    Review    │
+└──────────────────┘                          └──────────────┘</code></pre>
+<h3>5.2 核心表清单</h3>
+<table>
+<tr>
+<th>表名</th>
+<th>说明</th>
+<th>关键字段</th>
+</tr>
+<tr>
+<td>`user`</td>
+<td>用户表</td>
+<td>id, username, password_hash, role, status</td>
+</tr>
+<tr>
+<td>`category`</td>
+<td>类目表</td>
+<td>id, name, parent_id, sort_order</td>
+</tr>
+<tr>
+<td>`product`</td>
+<td>商品表</td>
+<td>id, category_id, name, price, stock, status</td>
+</tr>
+<tr>
+<td>`behavior`</td>
+<td>行为表</td>
+<td>id, user_id, product_id, type, weight</td>
+</tr>
+<tr>
+<td>`cart`</td>
+<td>购物车表</td>
+<td>id, user_id, product_id, quantity, checked</td>
+</tr>
+<tr>
+<td>`order`</td>
+<td>订单表</td>
+<td>id, order_no, user_id, total_amount, status</td>
+</tr>
+<tr>
+<td>`order_item`</td>
+<td>订单明细表</td>
+<td>id, order_no, product_id, price, quantity</td>
+</tr>
+<tr>
+<td>`review`</td>
+<td>评价表</td>
+<td>id, user_id, product_id, rating, content</td>
+</tr>
+</table>
+<blockquote><p>说明：`order` 为 MySQL 关键字，实际表名使用 `orders`。 详细字段定义、索引与约束见《数据库设计说明书》。</p></blockquote>
+<hr/>
+<h2>6. 接口设计规范</h2>
+<h3>6.1 统一响应体</h3>
+<pre><code>public class Result&lt;T&gt; {
+    private int code;         // 0=成功，非0=错误码
+    private String message;   // 提示信息
+    private T data;           // 业务数据
+    private long timestamp;   // 响应时间戳
+}</code></pre>
+<h3>6.2 错误码规范</h3>
+<table>
+<tr>
+<th>区间</th>
+<th>含义</th>
+<th>示例</th>
+</tr>
+<tr>
+<td>0</td>
+<td>成功</td>
+<td>`0 success`</td>
+</tr>
+<tr>
+<td>1000–1999</td>
+<td>通用错误</td>
+<td>`1001 参数校验失败`</td>
+</tr>
+<tr>
+<td>2000–2999</td>
+<td>用户/认证</td>
+<td>`2001 用户名或密码错误`</td>
+</tr>
+<tr>
+<td>3000–3999</td>
+<td>商品/类目</td>
+<td>`3001 商品不存在`</td>
+</tr>
+<tr>
+<td>4000–4999</td>
+<td>交易</td>
+<td>`4001 库存不足`</td>
+</tr>
+<tr>
+<td>5000–5999</td>
+<td>推荐</td>
+<td>`5001 推荐服务降级`</td>
+</tr>
+<tr>
+<td>9000–9999</td>
+<td>系统错误</td>
+<td>`9999 系统内部错误`</td>
+</tr>
+</table>
+<h3>6.3 接口命名与路径规范</h3>
+<ul>
+<li>路径统一前缀 `/api`。</li>
+<li>资源使用复数名词：`/api/products`、`/api/orders`。</li>
+<li>管理接口前缀 `/api/admin`。</li>
+<li>分页参数统一：`pageNum`（默认 1）、`pageSize`（默认 20）。</li>
+<li>时间字段统一使用 `LocalDateTime`，JSON 序列化格式 `yyyy-MM-dd HH:mm:ss`。</li>
+</ul>
+<hr/>
+<h2>7. 非功能设计</h2>
+<h3>7.1 性能设计</h3>
+<table>
+<tr>
+<th>措施</th>
+<th>说明</th>
+</tr>
+<tr>
+<td>连接池</td>
+<td>HikariCP，最大 20 连接，最小空闲 5</td>
+</tr>
+<tr>
+<td>数据库索引</td>
+<td>行为表 `(user_id)`、`(product_id)`、`(created_at)` 建索引</td>
+</tr>
+<tr>
+<td>推荐结果缓存</td>
+<td>首版不启用（数据量小，构建耗时毫秒级）；后续再做矩阵快照缓存，见 `docs/04` C2</td>
+</tr>
+<tr>
+<td>行为异步写入</td>
+<td>首版同步写入（数据量小、便于单测）；异步为后续优化，见 `docs/04` C3</td>
+</tr>
+<tr>
+<td>分页</td>
+<td>所有列表接口强制分页，禁止全表返回</td>
+</tr>
+</table>
+<h3>7.2 安全设计</h3>
+<table>
+<tr>
+<th>措施</th>
+<th>说明</th>
+</tr>
+<tr>
+<td>密码存储</td>
+<td>BCrypt（strength=10）加盐哈希</td>
+</tr>
+<tr>
+<td>认证</td>
+<td>JWT（HS256，有效期 24 小时），请求头 `Authorization: Bearer &lt;token&gt;`</td>
+</tr>
+<tr>
+<td>授权</td>
+<td>基于角色的接口级鉴权，用户维度数据隔离（只能访问自身数据）</td>
+</tr>
+<tr>
+<td>SQL 安全</td>
+<td>MyBatis 全参数化 `#{}`，禁用 `${}`</td>
+</tr>
+<tr>
+<td>配置安全</td>
+<td>数据库口令走环境变量，仓库只提交 `.env.example`</td>
+</tr>
+<tr>
+<td>越权防护</td>
+<td>订单/购物车查询强制拼接当前用户 ID 作为过滤条件</td>
+</tr>
+</table>
+<h3>7.3 可靠性设计</h3>
+<table>
+<tr>
+<th>措施</th>
+<th>说明</th>
+</tr>
+<tr>
+<td>推荐降级</td>
+<td>推荐引擎异常时自动降级为热门推荐，页面始终可用</td>
+</tr>
+<tr>
+<td>事务</td>
+<td>下单、库存扣减在同一事务内，库存更新加条件防超卖</td>
+</tr>
+<tr>
+<td>全局异常处理</td>
+<td>统一捕获异常，返回结构化错误，不暴露堆栈</td>
+</tr>
+<tr>
+<td>日志</td>
+<td>关键操作记录操作日志，异常记录错误日志</td>
+</tr>
+</table>
+<hr/>
+<h2>8. 部署架构</h2>
+<h3>8.1 开发环境</h3>
+<pre><code>本机：JDK 17 + Maven Wrapper + MySQL 8.0.27 + Node 22
+后端：mvnw spring-boot:run    → http://localhost:8080
+前端：npm run dev             → http://localhost:5173</code></pre>
+<h3>8.2 生产/演示环境（可选）</h3>
+<pre><code>docker-compose up -d
+├── mysql:8.0      (3306)  挂载 sql/schema.sql 自动初始化
+├── recommend-app  (8080)  后端 Spring Boot 容器
+└── recommend-web  (80)    前端 Nginx 静态托管</code></pre>
+<hr/>
+<h2>9. 设计约束</h2>
+<table>
+<tr>
+<th>编号</th>
+<th>约束</th>
+</tr>
+<tr>
+<td>D1</td>
+<td>必须使用 JDK 17，禁止降级到 Java 8（Spring Boot 3 硬性要求）</td>
+</tr>
+<tr>
+<td>D2</td>
+<td>禁止引入机器学习框架，推荐算法必须纯 Java 实现（保证可解释性）</td>
+</tr>
+<tr>
+<td>D3</td>
+<td>禁止在代码中硬编码任何账号口令、地址、端口</td>
+</tr>
+<tr>
+<td>D4</td>
+<td>所有 SQL 必须参数化，代码评审禁止 `${}` 拼接</td>
+</tr>
+<tr>
+<td>D5</td>
+<td>核心算法与 Service 必须有单元测试，交付前全量通过</td>
+</tr>
+<tr>
+<td>D6</td>
+<td>每次改动对应一个 commit，遵循 Conventional Commits</td>
+</tr>
+</table>
+<h2>10. 迭代新增的架构组件（2026-10-30）</h2>
+<p>本轮迭代在原有「策略 + 引擎 + 编排服务」三层之上，新增四类横切组件：</p>
+<table>
+<tr>
+<th>组件</th>
+<th>职责</th>
+<th>关键决策</th>
+</tr>
+<tr>
+<td>订单状态机</td>
+<td>集中声明合法流转（`OrderStatus.nextStates`）</td>
+<td>支付与确认收货不走通用改状态接口，堵住后台绕行</td>
+</tr>
+<tr>
+<td>后台定时任务</td>
+<td>超时取消（`OrderAutoCancelTask`）、超时确认收货（`OrderAutoReceiptTask`）</td>
+<td>`fixedDelay` 防堆叠；内部捕获异常防调度中断；阈值均可配置且 0 值关闭</td>
+</tr>
+<tr>
+<td>推荐模型缓存</td>
+<td>行为矩阵 + 用户相似邻居按矩阵版本号缓存</td>
+<td>版本号随矩阵重建自增，缓存整体失效无需手动清理；TTL 300s，实测首页 367ms → 19ms</td>
+</tr>
+<tr>
+<td>站内通知</td>
+<td>支付/发货事件写入 `notification`，铃铛展示未读数</td>
+<td>推送失败静默吞掉，绝不阻断主流程；接真实通道时只需在 push 内补发送动作</td>
+</tr>
+</table>
+<p>数据层相应增加 `order_status_log`（状态追溯）与 `notification` 两张表，orders 表增加 `pay_type / tracking_no / carrier / ship_time` 四列；演进方式见数据库设计说明书第 7 章。</p>
+<p>推荐编排层新增两类后处理：多样性打散（同级类目配额，作用于首页与热门列表，刻意不作用于相似推荐）与冷启动分流（交互数低于阈值的新用户跳过协同过滤）。详见详细设计说明书第 15 章。</p></body></html>
