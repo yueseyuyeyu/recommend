@@ -21,6 +21,25 @@ export const getHybridRecommend = (itemId, topN = 10) =>
 export const evaluateRecommend = (topN = 10) =>
   http.get('/recommend/evaluate', { params: { topN } })
 
+/**
+ * 分页推荐流，供首页无限滚动使用。
+ * 游客也能调用：服务端会自动降级为「热门 + 销量」序列。
+ */
+export const getRecommendFeed = (pageNum = 1, pageSize = 10) =>
+  http.get('/recommend/feed', { params: { pageNum, pageSize } })
+
+/* ===== 轮播图 ===== */
+export const getCarousels = () => http.get('/carousels')
+
+/* ===== 收藏 ===== */
+export const addFavorite = (productId) => http.post(`/favorites/${productId}`)
+export const removeFavorite = (productId) => http.delete(`/favorites/${productId}`)
+export const getFavorites = (params) => http.get('/favorites', { params })
+/** 一次性拿到当前用户收藏的全部商品 ID，用于列表页渲染红心 */
+export const getFavoriteIds = () => http.get('/favorites/ids')
+export const getFavoriteCount = () => http.get('/favorites/count')
+export const checkFavorite = (productId) => http.get(`/favorites/check/${productId}`)
+
 /* ===== 评价 ===== */
 export const getReviews = (params) => http.get('/reviews', { params })
 export const submitReview = (data) => http.post('/reviews', data)
