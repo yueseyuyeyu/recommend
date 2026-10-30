@@ -7,6 +7,7 @@ const routes = [
   { path: '/products', name: 'products', component: () => import('../views/ProductList.vue') },
   { path: '/products/:id', name: 'product-detail', component: () => import('../views/ProductDetail.vue') },
   { path: '/cart', name: 'cart', component: () => import('../views/Cart.vue'), meta: { requiresAuth: true } },
+  { path: '/favorites', name: 'favorites', component: () => import('../views/Favorites.vue'), meta: { requiresAuth: true } },
   { path: '/orders', name: 'orders', component: () => import('../views/Orders.vue'), meta: { requiresAuth: true } },
   { path: '/admin', name: 'admin', component: () => import('../views/Admin.vue'), meta: { requiresAuth: true, requiresAdmin: true } },
   { path: '/login', name: 'login', component: () => import('../views/Login.vue') },

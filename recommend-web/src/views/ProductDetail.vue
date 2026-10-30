@@ -11,10 +11,13 @@ import {
   submitReview
 } from '../api'
 import { useUserStore } from '../stores/user'
+import { useFavoriteStore } from '../stores/favorite'
+import ProductCard from '../components/ProductCard.vue'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const favoriteStore = useFavoriteStore()
 
 const product = ref(null)
 const similar = ref([])
@@ -124,6 +127,28 @@ async function handleAddCart() {
   }
 }
 
+/**
+ * 切换收藏。
+ *
+ * @param {object} [target] 传入商品对象时收藏该商品（相似推荐卡片用），
+ *                          不传则收藏当前详情页商品
+ */
+async function toggleFavorite(target) {
+  const item = target || product.value
+  if (!item) return
+  if (!userStore.isLoggedIn) {
+    ElMessage.warning('登录后才能收藏商品')
+    router.push({ path: '/login', query: { redirect: route.fullPath } })
+    return
+  }
+  try {
+    const nowFavorited = await favoriteStore.toggle(item.id)
+    ElMessage.success(nowFavorited ? '已加入收藏夹' : '已取消收藏')
+  } catch {
+    ElMessage.error('操作失败，请稍后重试')
+  }
+}
+
 function openSimilar(item) {
   if (userStore.isLoggedIn) {
     reportBehavior({ productId: item.id, behaviorType: 'CLICK' }).catch(() => {})
@@ -166,6 +191,23 @@ watch(productId, () => loadProduct(), { immediate: true })
             <div class="buy-row">
               <el-input-number v-model="quantity" :min="1" :max="product.stock || 1" />
               <el-button type="primary" :loading="adding" @click="handleAddCart">加入购物车</el-button>
+              <el-button
+                :type="favoriteStore.isFavorited(product.id) ? 'danger' : 'default'"
+                :plain="favoriteStore.isFavorited(product.id)"
+                @click="toggleFavorite()"
+              >
+                <svg
+                  class="fav-btn-icon"
+                  :class="{ 'is-on': favoriteStore.isFavorited(product.id) }"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M12 20.7l-1.45-1.32C5.4 14.6 2 11.5 2 8.2 2 5.6 4.1 3.5 6.7 3.5c1.5 0 2.9.7 3.8 1.8.9-1.1 2.3-1.8 3.8-1.8 2.6 0 4.7 2.1 4.7 4.7 0 3.3-3.4 6.4-8.55 11.18L12 20.7z"
+                  />
+                </svg>
+                {{ favoriteStore.isFavorited(product.id) ? '已收藏' : '收藏' }}
+              </el-button>
             </div>
           </div>
         </div>
@@ -173,28 +215,14 @@ watch(productId, () => loadProduct(), { immediate: true })
 
       <h3 class="section-title">相似推荐</h3>
       <div class="card-grid">
-        <el-card
+        <ProductCard
           v-for="item in similar"
           :key="item.id"
-          class="product-card"
-          shadow="hover"
-          @click="openSimilar(item)"
-        >
-          <div class="similar-cover">
-            <el-image v-if="item.mainImage" :src="item.mainImage" fit="cover" class="similar-img">
-              <template #error>
-                <div class="image-placeholder">暂无图片</div>
-              </template>
-            </el-image>
-            <div v-else class="image-placeholder">暂无图片</div>
-          </div>
-          <div class="name">{{ item.name }}</div>
-          <div class="row">
-            <span class="price">￥{{ item.price }}</span>
-            <span class="muted">销量 {{ item.sales }}</span>
-          </div>
-          <div v-if="item.reason" class="reason">{{ item.reason }}</div>
-        </el-card>
+          :item="item"
+          :favorited="favoriteStore.isFavorited(item.id)"
+          @open="openSimilar"
+          @toggle-favorite="toggleFavorite"
+        />
       </div>
       <el-empty v-if="similar.length === 0" description="暂无相似商品推荐" />
 
@@ -305,6 +333,22 @@ watch(productId, () => loadProduct(), { immediate: true })
   align-items: center;
   gap: 12px;
   margin-top: 24px;
+}
+
+/* 收藏按钮里的小爱心 */
+.fav-btn-icon {
+  width: 15px;
+  height: 15px;
+  margin-right: 4px;
+  vertical-align: -2px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.fav-btn-icon.is-on {
+  fill: currentColor;
 }
 
 .product-card {

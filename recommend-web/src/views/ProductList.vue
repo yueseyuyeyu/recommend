@@ -1,11 +1,16 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { getCategories, getProducts, reportBehavior } from '../api'
 import { useUserStore } from '../stores/user'
+import { useFavoriteStore } from '../stores/favorite'
+import ProductCard from '../components/ProductCard.vue'
 
+const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
+const favoriteStore = useFavoriteStore()
 
 const categories = ref([])
 const products = ref([])
@@ -40,6 +45,19 @@ const categoryOptions = computed(() => {
   }
   return options
 })
+
+/**
+ * 从 URL 查询参数初始化筛选条件。
+ *
+ * <p>首页搜索框、分类菜单、轮播图链接都是通过 query 跳转到本页的，
+ * 不读 query 就会出现「点了搜索但列表没变」的问题。
+ */
+function syncQueryFromRoute() {
+  query.keyword = route.query.keyword || ''
+  query.categoryId = route.query.categoryId ? Number(route.query.categoryId) : null
+  query.sort = route.query.sort || 'default'
+  pageNum.value = 1
+}
 
 async function loadCategories() {
   try {
@@ -98,7 +116,29 @@ function openProduct(item) {
   router.push(`/products/${item.id}`)
 }
 
-onMounted(() => {
+async function toggleFavorite(item) {
+  try {
+    const nowFavorited = await favoriteStore.toggle(item.id)
+    ElMessage.success(nowFavorited ? '已加入收藏夹' : '已取消收藏')
+  } catch {
+    ElMessage.error('操作失败，请稍后重试')
+  }
+}
+
+// 同一页面内从首页再跳一次（query 变化但组件复用）时也能刷新
+watch(
+  () => route.query,
+  () => {
+    if (route.path === '/products') {
+      syncQueryFromRoute()
+      loadProducts()
+    }
+  }
+)
+
+onMounted(async () => {
+  syncQueryFromRoute()
+  if (userStore.isLoggedIn) favoriteStore.load()
   loadCategories()
   loadProducts()
 })
@@ -147,32 +187,15 @@ onMounted(() => {
     </el-card>
 
     <div v-loading="loading" class="card-grid">
-      <el-card
+      <ProductCard
         v-for="item in products"
         :key="item.id"
-        class="product-card"
-        shadow="hover"
-        @click="openProduct(item)"
-      >
-        <div class="cover">
-          <el-image v-if="item.mainImage" :src="item.mainImage" fit="cover" class="cover-img">
-            <template #error>
-              <div class="image-placeholder">暂无图片</div>
-            </template>
-          </el-image>
-          <div v-else class="image-placeholder">暂无图片</div>
-        </div>
-        <div class="name">{{ item.name }}</div>
-        <div class="muted">{{ item.subtitle }}</div>
-        <div class="row">
-          <span class="price">￥{{ item.price }}</span>
-          <span class="muted">销量 {{ item.sales }}</span>
-        </div>
-        <div class="row">
-          <el-tag v-if="item.categoryName" size="small" type="info">{{ item.categoryName }}</el-tag>
-          <span class="muted">库存 {{ item.stock }}</span>
-        </div>
-      </el-card>
+        :item="item"
+        :favorited="favoriteStore.isFavorited(item.id)"
+        :show-reason="false"
+        @open="openProduct"
+        @toggle-favorite="toggleFavorite"
+      />
     </div>
 
     <el-empty v-if="!loading && products.length === 0" description="没有找到商品" />
@@ -199,39 +222,28 @@ onMounted(() => {
   color: #909399;
 }
 
-.product-card {
-  cursor: pointer;
-}
-
-.cover {
-  height: 160px;
-  overflow: hidden;
-}
-
-.cover-img {
-  width: 100%;
-  height: 160px;
-  display: block;
-}
-
-.name {
-  margin-top: 8px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 8px;
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+  min-height: 80px;
 }
 
 .pagination {
   display: flex;
   justify-content: center;
   margin-top: 20px;
+}
+
+@media (max-width: 1100px) {
+  .card-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 </style>
