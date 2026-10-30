@@ -222,6 +222,25 @@ CREATE TABLE `carousel` (
   KEY `idx_status_sort` (`status`, `sort_order`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '首页轮播图表';
 
+-- ----------------------------
+-- 11. 用户收货地址表
+--     一个用户多条地址，其中最多一条 is_default=1（由服务层保证）
+-- ----------------------------
+DROP TABLE IF EXISTS `user_address`;
+CREATE TABLE `user_address` (
+  `id`              BIGINT       NOT NULL AUTO_INCREMENT COMMENT '地址ID',
+  `user_id`         BIGINT       NOT NULL                COMMENT '用户ID',
+  `receiver_name`   VARCHAR(64)  NOT NULL                COMMENT '收货人',
+  `receiver_phone`  VARCHAR(32)  NOT NULL                COMMENT '联系电话',
+  `detail_address`  VARCHAR(255) NOT NULL                COMMENT '详细地址（含省市区）',
+  `is_default`      TINYINT      NOT NULL DEFAULT 0      COMMENT '是否默认：1-是，0-否',
+  `is_deleted`      TINYINT      NOT NULL DEFAULT 0      COMMENT '逻辑删除',
+  `create_time`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_user_default` (`user_id`, `is_default`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '用户收货地址表';
+
 -- 轮播图初始数据
 INSERT INTO `carousel` (`title`, `subtitle`, `bg_color`, `link_url`, `sort_order`, `status`) VALUES
 ('个性化推荐引擎', '基于 UserCF 与 ItemCF 双引擎，为你挑选真正感兴趣的商品', 'linear-gradient(135deg,#ff6a00,#ee0979)', '/products', 1, 1),

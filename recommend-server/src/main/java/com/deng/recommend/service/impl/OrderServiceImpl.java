@@ -19,13 +19,16 @@ import com.deng.recommend.mapper.CartMapper;
 import com.deng.recommend.mapper.OrderItemMapper;
 import com.deng.recommend.mapper.OrderMapper;
 import com.deng.recommend.mapper.ProductMapper;
+import com.deng.recommend.service.AddressService;
 import com.deng.recommend.service.OrderService;
+import com.deng.recommend.vo.AddressVO;
 import com.deng.recommend.vo.OrderItemVO;
 import com.deng.recommend.vo.OrderVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -59,6 +62,7 @@ public class OrderServiceImpl implements OrderService {
     private final CartMapper cartMapper;
     private final ProductMapper productMapper;
     private final BehaviorMapper behaviorMapper;
+    private final AddressService addressService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -93,9 +97,12 @@ public class OrderServiceImpl implements OrderService {
         order.setUserId(userId);
         order.setTotalAmount(totalAmount);
         order.setStatus(OrderStatus.PENDING.getCode());
-        order.setReceiverName(request.getReceiverName());
-        order.setReceiverPhone(request.getReceiverPhone());
-        order.setReceiverAddr(request.getReceiverAddr());
+
+        // 收货信息：优先用地址簿（服务端回查，杜绝前端伪造），否则用请求里的手填值
+        ReceiverInfo receiver = resolveReceiver(userId, request);
+        order.setReceiverName(receiver.name());
+        order.setReceiverPhone(receiver.phone());
+        order.setReceiverAddr(receiver.addr());
         orderMapper.insert(order);
 
         LocalDateTime now = LocalDateTime.now();
@@ -226,5 +233,35 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException(ResultCode.FORBIDDEN);
         }
         return order;
+    }
+
+    /**
+     * 解析收货信息。
+     *
+     * <p>优先走地址簿：{@code addressId} 会经 {@code AddressService.getOwned} 回查，
+     * 顺带校验这条地址属于当前用户——前端传什么收货信息都不作数，
+     * 避免有人改请求体把货寄到别处。
+     *
+     * <p>没有 {@code addressId} 时退化为手填三项，三项必须齐全。
+     */
+    private ReceiverInfo resolveReceiver(Long userId, OrderCreateRequest request) {
+        if (request.getAddressId() != null) {
+            AddressVO address = addressService.getOwned(userId, request.getAddressId());
+            return new ReceiverInfo(address.getReceiverName(), address.getReceiverPhone(),
+                    address.getDetailAddress());
+        }
+
+        if (!StringUtils.hasText(request.getReceiverName())
+                || !StringUtils.hasText(request.getReceiverPhone())
+                || !StringUtils.hasText(request.getReceiverAddr())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "请选择收货地址");
+        }
+        return new ReceiverInfo(request.getReceiverName().trim(),
+                request.getReceiverPhone().trim(),
+                request.getReceiverAddr().trim());
+    }
+
+    /** 解析后的收货信息 */
+    private record ReceiverInfo(String name, String phone, String addr) {
     }
 }
