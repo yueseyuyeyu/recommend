@@ -4,6 +4,7 @@ import com.deng.recommend.common.PageResult;
 import com.deng.recommend.common.Result;
 import com.deng.recommend.config.SecurityUtils;
 import com.deng.recommend.dto.UpdateProfileRequest;
+import com.deng.recommend.service.FileStorageService;
 import com.deng.recommend.service.UserProfileService;
 import com.deng.recommend.vo.HistoryVO;
 import com.deng.recommend.vo.UserStatsVO;
@@ -12,11 +13,13 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * 个人中心接口。
@@ -31,6 +34,22 @@ import org.springframework.web.bind.annotation.RestController;
 public class UserController {
 
     private final UserProfileService userProfileService;
+    private final FileStorageService fileStorageService;
+
+    /**
+     * 上传头像。
+     *
+     * <p>只负责把图片存到磁盘并返回可访问 URL，并不会自动写入用户资料——
+     * 前端拿到 URL 后放进表单，用户点「保存」才真正生效，
+     * 这样用户选错图片时还能取消。
+     *
+     * @param file 图片文件，支持 jpg/png/gif/webp，最大 2MB
+     * @return 图片访问地址，如 {@code /uploads/avatar/2_ab12cd.png}
+     */
+    @PostMapping("/avatar")
+    public Result<String> uploadAvatar(@RequestParam("file") MultipartFile file) {
+        return Result.success(fileStorageService.storeAvatar(SecurityUtils.currentUserId(), file));
+    }
 
     /**
      * 查询我的资料。

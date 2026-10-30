@@ -66,6 +66,8 @@ public class SecurityConfig {
                                 "/api/recommend/similar/**").permitAll()
                         // 接口文档公开
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
+                        // 用户上传的图片（头像）公开可读，否则前端 <img> 带不上 token 会 401
+                        .requestMatchers(HttpMethod.GET, "/uploads/**").permitAll()
                         // 健康检查公开（仅 health/info 被暴露，其余 actuator 端点仍须认证）
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                         // 后台管理接口与算法评测仅管理员

@@ -58,6 +58,10 @@ application-secret.yml
 *_dump.sql
 *_backup.sql
 
+# ===== 用户上传文件 =====
+# 头像是运行时产生的用户数据，不进版本库
+uploads/
+
 # ===== 系统 =====
 .DS_Store
 Thumbs.db
