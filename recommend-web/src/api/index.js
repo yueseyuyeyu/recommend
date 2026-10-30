@@ -89,6 +89,15 @@ export const payOrder = (orderNo, payType) =>
   http.post(`/orders/${orderNo}/pay`, null, { params: { payType } })
 /** 确认收货：已发货 → 已完成 */
 export const confirmReceipt = (orderNo) => http.post(`/orders/${orderNo}/receipt`)
+/** 订单状态变更历史 */
+export const getOrderLogs = (orderNo) => http.get(`/orders/${orderNo}/logs`)
+
+/* ===== 站内通知 ===== */
+export const getNotifications = (pageNum = 1, pageSize = 10) =>
+  http.get('/notifications', { params: { pageNum, pageSize } })
+export const getUnreadCount = () => http.get('/notifications/unread-count')
+export const markNotificationRead = (id) => http.put(`/notifications/${id}/read`)
+export const markAllNotificationsRead = () => http.put('/notifications/read-all')
 
 /* ===== 后台 ===== */
 export const getStatistics = () => http.get('/admin/statistics')

@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { cancelOrder, confirmReceipt, getOrderDetail, getOrders } from '../api'
+import { cancelOrder, confirmReceipt, getOrderDetail, getOrderLogs, getOrders } from '../api'
 
 const router = useRouter()
 const loading = ref(false)
@@ -13,6 +13,8 @@ const pageSize = ref(10)
 const detailVisible = ref(false)
 const detailLoading = ref(false)
 const detail = ref(null)
+/** 订单流转日志，详情弹窗里以时间轴展示 */
+const logs = ref([])
 
 async function loadOrders() {
   loading.value = true
@@ -77,8 +79,15 @@ async function handleDetail(row) {
   detailVisible.value = true
   detailLoading.value = true
   detail.value = null
+  logs.value = []
   try {
-    detail.value = await getOrderDetail(row.orderNo)
+    // 详情与流转日志一起拉，避免弹窗内二次闪烁
+    const [detailData, logData] = await Promise.all([
+      getOrderDetail(row.orderNo),
+      getOrderLogs(row.orderNo)
+    ])
+    detail.value = detailData
+    logs.value = logData || []
   } catch {
     detailVisible.value = false
   } finally {
@@ -204,6 +213,30 @@ onMounted(loadOrders)
               <template #default="{ row }"><span class="price">￥{{ row.subtotal }}</span></template>
             </el-table-column>
           </el-table>
+
+          <!-- 状态流转记录 -->
+          <div class="log-section">
+            <div class="log-title">状态流转记录</div>
+            <el-timeline v-if="logs.length">
+              <el-timeline-item
+                v-for="item in logs"
+                :key="item.id"
+                :timestamp="formatTime(item.createTime)"
+                placement="top"
+                :type="item.toStatus === 4 ? 'danger' : item.toStatus === 3 ? 'success' : 'primary'"
+              >
+                <div class="log-main">
+                  <span class="log-status">
+                    {{ item.fromStatusName ? `${item.fromStatusName} → ` : '' }}{{ item.toStatusName }}
+                  </span>
+                  <el-tag size="small" type="info">{{ item.operatorTypeName }}</el-tag>
+                  <span v-if="item.operatorName" class="muted">{{ item.operatorName }}</span>
+                </div>
+                <div v-if="item.remark" class="log-remark">{{ item.remark }}</div>
+              </el-timeline-item>
+            </el-timeline>
+            <div v-else class="muted">暂无流转记录</div>
+          </div>
         </template>
       </div>
     </el-dialog>
@@ -228,6 +261,38 @@ onMounted(loadOrders)
 }
 
 .muted {
+  font-size: 12px;
+  color: #909399;
+}
+
+/* 状态流转记录 */
+.log-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #f5f5f5;
+}
+
+.log-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 12px;
+}
+
+.log-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.log-status {
+  font-weight: 600;
+  color: #303133;
+}
+
+.log-remark {
+  margin-top: 4px;
   font-size: 12px;
   color: #909399;
 }

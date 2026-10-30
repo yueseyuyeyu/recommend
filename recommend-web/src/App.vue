@@ -1,7 +1,13 @@
 <script setup>
-import { computed, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import {
+  getNotifications,
+  getUnreadCount,
+  markAllNotificationsRead,
+  markNotificationRead
+} from './api'
 import { useUserStore } from './stores/user'
 import { useFavoriteStore } from './stores/favorite'
 
@@ -27,8 +33,14 @@ const avatarText = computed(() => {
 watch(
   () => userStore.isLoggedIn,
   (loggedIn) => {
-    if (loggedIn) favoriteStore.load()
-    else favoriteStore.reset()
+    if (loggedIn) {
+      favoriteStore.load()
+      refreshUnread()
+    } else {
+      favoriteStore.reset()
+      notifications.value = []
+      unreadCount.value = 0
+    }
   },
   { immediate: true }
 )
@@ -36,12 +48,83 @@ watch(
 function handleLogout() {
   userStore.logout()
   favoriteStore.reset()
+  notifications.value = []
+  unreadCount.value = 0
   ElMessage.success('已退出登录')
   router.push('/')
 }
 
+/* ---------- 站内通知 ---------- */
+const notifications = ref([])
+const unreadCount = ref(0)
+const notifyVisible = ref(false)
+const notifyLoading = ref(false)
+let notifyTimer = null
+
+async function refreshUnread() {
+  if (!userStore.isLoggedIn) {
+    unreadCount.value = 0
+    return
+  }
+  try {
+    unreadCount.value = Number(await getUnreadCount()) || 0
+  } catch {
+    unreadCount.value = 0
+  }
+}
+
+async function loadNotifications() {
+  if (!userStore.isLoggedIn) return
+  notifyLoading.value = true
+  try {
+    const page = await getNotifications(1, 8)
+    notifications.value = page?.records || []
+  } catch {
+    notifications.value = []
+  } finally {
+    notifyLoading.value = false
+  }
+}
+
+async function handleNotificationClick(item) {
+  if (item.isRead !== 1) {
+    try {
+      await markNotificationRead(item.id)
+      item.isRead = 1
+      await refreshUnread()
+    } catch {
+      // 标记失败不影响跳转
+    }
+  }
+  // 通知都是订单相关，直接去订单页
+  router.push('/orders')
+}
+
+async function handleReadAll() {
+  try {
+    await markAllNotificationsRead()
+    ElMessage.success('已全部标记为已读')
+    await Promise.all([loadNotifications(), refreshUnread()])
+  } catch {
+    // 错误提示由拦截器处理
+  }
+}
+
+function formatNotifyTime(time) {
+  return (time || '').replace('T', ' ').slice(5, 16)
+}
+
+onBeforeUnmount(() => {
+  if (notifyTimer) clearInterval(notifyTimer)
+})
+
 onMounted(() => {
-  if (userStore.isLoggedIn) favoriteStore.load()
+  if (userStore.isLoggedIn) {
+    favoriteStore.load()
+    refreshUnread()
+  }
+  // 每 60 秒拉一次未读数，够用且不会给后端造成压力
+  notifyTimer = setInterval(refreshUnread, 60_000)
 })
 </script>
 
@@ -75,6 +158,55 @@ onMounted(() => {
 
       <div class="user-area">
         <template v-if="userStore.isLoggedIn">
+          <!-- 通知铃铛 -->
+          <el-popover
+            v-model:visible="notifyVisible"
+            trigger="click"
+            placement="bottom-end"
+            :width="360"
+            popper-class="notify-popper"
+            @show="loadNotifications"
+          >
+            <template #reference>
+              <button class="bell" type="button" title="消息通知">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M18 16v-5a6 6 0 1 0-12 0v5l-2 2h16l-2-2z" />
+                  <path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2z" />
+                </svg>
+                <span v-if="unreadCount > 0" class="bell-badge">
+                  {{ unreadCount > 99 ? '99+' : unreadCount }}
+                </span>
+              </button>
+            </template>
+
+            <div class="notify-head">
+              <span class="notify-title">消息通知</span>
+              <el-button v-if="unreadCount > 0" link type="primary" size="small" @click="handleReadAll">
+                全部已读
+              </el-button>
+            </div>
+
+            <div v-loading="notifyLoading" class="notify-list">
+              <div
+                v-for="item in notifications"
+                :key="item.id"
+                class="notify-item"
+                :class="{ 'is-unread': item.isRead !== 1 }"
+                @click="handleNotificationClick(item)"
+              >
+                <div class="notify-item-head">
+                  <span class="notify-item-title">{{ item.title }}</span>
+                  <span class="notify-time">{{ formatNotifyTime(item.createTime) }}</span>
+                </div>
+                <div class="notify-content">{{ item.content }}</div>
+              </div>
+
+              <div v-if="!notifyLoading && notifications.length === 0" class="notify-empty">
+                暂无消息
+              </div>
+            </div>
+          </el-popover>
+
           <!-- 头像 + 昵称整体可点，进入个人中心 -->
           <div class="user-chip" @click="router.push('/profile')">
             <el-avatar :size="36" :src="userStore.userInfo?.avatar || undefined" class="chip-avatar">
@@ -185,5 +317,129 @@ onMounted(() => {
   font-weight: 600;
   flex: 0 0 auto;
   border: 1px solid #ffe0d0;
+}
+
+/* ---------- 通知铃铛 ---------- */
+.bell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.bell:hover {
+  background: #f5f7fa;
+}
+
+.bell svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: #606266;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.bell-badge {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #f56c6c;
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.notify-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.notify-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.notify-list {
+  max-height: 320px;
+  overflow-y: auto;
+  min-height: 60px;
+}
+
+.notify-item {
+  padding: 10px 4px;
+  border-bottom: 1px solid #fafafa;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.notify-item:hover {
+  background: #fafafa;
+}
+
+.notify-item-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.notify-item-title {
+  font-size: 13px;
+  color: #303133;
+}
+
+/* 未读用左侧圆点 + 加粗标题提示，不靠整块底色 */
+.notify-item.is-unread .notify-item-title {
+  font-weight: 600;
+}
+
+.notify-item.is-unread .notify-item-title::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: #f56c6c;
+  vertical-align: 2px;
+}
+
+.notify-time {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: #b1b3b8;
+}
+
+.notify-content {
+  margin-top: 3px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+}
+
+.notify-empty {
+  padding: 24px 0;
+  text-align: center;
+  font-size: 13px;
+  color: #c0c4cc;
 }
 </style>
