@@ -61,4 +61,26 @@ public interface OrderService {
      * @param payType 支付方式码：1-支付宝，2-微信支付，3-银行卡
      */
     void pay(Long userId, String orderNo, Integer payType);
+
+    /**
+     * 用户确认收货：已发货 → 已完成。
+     *
+     * <p>只允许从「已发货」流转，待支付/已支付/已完成都无法确认收货，
+     * 避免用户跳过发货环节直接把订单标记完成。
+     *
+     * @param userId  当前用户
+     * @param orderNo 订单号
+     */
+    void confirmReceipt(Long userId, String orderNo);
+
+    /**
+     * 自动取消超时未支付的订单。
+     *
+     * <p>库存回滚复用 {@link #cancel} 的那套逻辑，保证「用户取消」与
+     * 「系统超时取消」的结果完全一致。
+     *
+     * @param timeoutMinutes 未支付存活时长（分钟），小于等于 0 表示不处理
+     * @return 本轮实际取消的订单数
+     */
+    int cancelExpiredOrders(int timeoutMinutes);
 }

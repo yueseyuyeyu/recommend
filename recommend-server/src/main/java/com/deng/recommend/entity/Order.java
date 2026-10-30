@@ -46,6 +46,9 @@ public class Order {
 
     private LocalDateTime paidTime;
 
+    /** 物流单号，发货时填写 */
+    private String trackingNo;
+
     @TableLogic
     private Integer isDeleted;
 

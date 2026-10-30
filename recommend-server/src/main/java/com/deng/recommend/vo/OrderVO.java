@@ -37,6 +37,9 @@ public class OrderVO {
     /** 支付时间，未支付为 null */
     private LocalDateTime paidTime;
 
+    /** 物流单号，未发货为 null */
+    private String trackingNo;
+
     private String receiverName;
 
     private String receiverPhone;

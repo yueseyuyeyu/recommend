@@ -141,6 +141,7 @@ CREATE TABLE `orders` (
   `receiver_phone` VARCHAR(32)   DEFAULT NULL            COMMENT '联系电话',
   `receiver_addr`  VARCHAR(255)  DEFAULT NULL            COMMENT '收货地址',
   `paid_time`      DATETIME      DEFAULT NULL            COMMENT '支付时间',
+  `tracking_no`    VARCHAR(64)   DEFAULT NULL            COMMENT '物流单号，发货时填写',
   `is_deleted`     TINYINT       NOT NULL DEFAULT 0      COMMENT '逻辑删除',
   `create_time`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',

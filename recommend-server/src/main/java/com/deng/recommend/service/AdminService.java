@@ -108,6 +108,17 @@ public interface AdminService {
     void updateOrderStatus(String orderNo, Integer status);
 
     /**
+     * 发货：已支付 → 已发货，并记录物流单号。
+     *
+     * <p>单独开一个接口而不是复用 {@link #updateOrderStatus}，
+     * 是为了强制发货必须带物流单号——通用改状态接口拿不到这个参数。
+     *
+     * @param orderNo    订单号
+     * @param trackingNo 物流单号，不允许为空
+     */
+    void ship(String orderNo, String trackingNo);
+
+    /**
      * 汇总后台首页统计指标。
      *
      * @return 统计指标键值对

@@ -103,6 +103,19 @@ public class AdminController {
         return Result.success();
     }
 
+    /**
+     * 发货：已支付 → 已发货，必须填物流单号。
+     *
+     * <p>{@code trackingNo} 设为非必填，让校验落在服务层，
+     * 这样缺单号时返回的是「请填写物流单号」而不是框架的缺参错误。
+     */
+    @PostMapping("/orders/{orderNo}/ship")
+    public Result<Void> ship(@PathVariable String orderNo,
+                             @RequestParam(required = false) String trackingNo) {
+        adminService.ship(orderNo, trackingNo);
+        return Result.success();
+    }
+
     @GetMapping("/statistics")
     public Result<Map<String, Object>> statistics() {
         return Result.success(adminService.statistics());

@@ -252,11 +252,44 @@ public class AdminServiceImpl implements AdminService {
             return;
         }
 
+        // 发货必须带物流单号，走专门的 ship 接口
+        if (target == OrderStatus.SHIPPED) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "发货请通过发货操作填写物流单号");
+        }
+
         Order update = new Order();
         update.setId(order.getId());
         update.setStatus(target.getCode());
         orderMapper.updateById(update);
         log.info("订单状态变更, orderNo={}, {} -> {}", orderNo, current.getName(), target.getName());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void ship(String orderNo, String trackingNo) {
+        if (!StringUtils.hasText(trackingNo)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "请填写物流单号");
+        }
+
+        Order order = orderMapper.selectOne(new LambdaQueryWrapper<Order>()
+                .eq(Order::getOrderNo, orderNo));
+        if (order == null) {
+            throw new BusinessException(ResultCode.ORDER_NOT_FOUND);
+        }
+
+        OrderStatus current = OrderStatus.of(order.getStatus());
+        if (!current.canTransitionTo(OrderStatus.SHIPPED)) {
+            throw new BusinessException(ResultCode.ORDER_STATUS_ILLEGAL,
+                    "订单当前为「" + current.getName() + "」，不能发货");
+        }
+
+        Order update = new Order();
+        update.setId(order.getId());
+        update.setStatus(OrderStatus.SHIPPED.getCode());
+        update.setTrackingNo(trackingNo.trim());
+        orderMapper.updateById(update);
+
+        log.info("订单发货, orderNo={}, trackingNo={}", orderNo, trackingNo.trim());
     }
 
     @Override
@@ -319,6 +352,7 @@ public class AdminServiceImpl implements AdminService {
                 .payType(order.getPayType())
                 .payTypeName(PayType.nameOf(order.getPayType()))
                 .paidTime(order.getPaidTime())
+                .trackingNo(order.getTrackingNo())
                 .receiverName(order.getReceiverName())
                 .receiverPhone(order.getReceiverPhone())
                 .receiverAddr(order.getReceiverAddr())

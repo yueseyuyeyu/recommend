@@ -93,4 +93,15 @@ public class OrderController {
         orderService.pay(SecurityUtils.currentUserId(), orderNo, payType);
         return Result.success();
     }
+
+    /**
+     * 确认收货：已发货 → 已完成。
+     *
+     * <p>由用户自己点，不必等后台操作。
+     */
+    @PostMapping("/{orderNo}/receipt")
+    public Result<Void> confirmReceipt(@PathVariable String orderNo) {
+        orderService.confirmReceipt(SecurityUtils.currentUserId(), orderNo);
+        return Result.success();
+    }
 }

@@ -177,12 +177,71 @@ public class OrderServiceImpl implements OrderService {
     @Transactional(rollbackFor = Exception.class)
     public void cancel(Long userId, String orderNo) {
         Order order = getOwnedOrder(userId, orderNo);
+        doCancel(order);
+        log.info("取消订单成功, userId={}, orderNo={}", userId, orderNo);
+    }
+
+    @Override
+    public void confirmReceipt(Long userId, String orderNo) {
+        Order order = getOwnedOrder(userId, orderNo);
+        OrderStatus current = OrderStatus.of(order.getStatus());
+
+        if (!current.canTransitionTo(OrderStatus.FINISHED)) {
+            throw new BusinessException(ResultCode.ORDER_STATUS_ILLEGAL,
+                    "订单当前为「" + current.getName() + "」，不能确认收货");
+        }
+
+        Order update = new Order();
+        update.setId(order.getId());
+        update.setStatus(OrderStatus.FINISHED.getCode());
+        orderMapper.updateById(update);
+        log.info("确认收货成功, userId={}, orderNo={}", userId, orderNo);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int cancelExpiredOrders(int timeoutMinutes) {
+        if (timeoutMinutes <= 0) {
+            return 0;
+        }
+
+        LocalDateTime deadline = LocalDateTime.now().minusMinutes(timeoutMinutes);
+        List<Order> expired = orderMapper.selectList(new LambdaQueryWrapper<Order>()
+                .eq(Order::getStatus, OrderStatus.PENDING.getCode())
+                .lt(Order::getCreateTime, deadline));
+
+        if (expired.isEmpty()) {
+            return 0;
+        }
+
+        int cancelled = 0;
+        for (Order order : expired) {
+            try {
+                doCancel(order);
+                cancelled++;
+            } catch (Exception e) {
+                // 单笔失败不影响其余订单，下一轮扫描还会重试
+                log.warn("自动取消订单失败, orderNo={}", order.getOrderNo(), e);
+            }
+        }
+        log.info("超时未支付自动取消完成, 超时阈值={}分钟, 本轮取消={}笔", timeoutMinutes, cancelled);
+        return cancelled;
+    }
+
+    /**
+     * 执行取消：校验可取消状态、回滚库存、置为已取消。
+     *
+     * <p>抽成私有方法是因为用户主动取消和定时任务自动取消都要走同一套逻辑。
+     * 注意不能在这里再调 {@code cancel()}——同类内部调用不会经过 Spring 代理，
+     * {@code @Transactional} 会失效。
+     */
+    private void doCancel(Order order) {
         if (!order.getStatusEnum().cancellable()) {
             throw new BusinessException(ResultCode.ORDER_NOT_CANCELLABLE);
         }
 
         List<OrderItem> items = orderItemMapper.selectList(
-                new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderNo, orderNo));
+                new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderNo, order.getOrderNo()));
         for (OrderItem item : items) {
             LambdaUpdateWrapper<Product> wrapper = new LambdaUpdateWrapper<Product>()
                     .eq(Product::getId, item.getProductId())
@@ -194,7 +253,6 @@ public class OrderServiceImpl implements OrderService {
         update.setId(order.getId());
         update.setStatus(OrderStatus.CANCELLED.getCode());
         orderMapper.updateById(update);
-        log.info("取消订单成功, userId={}, orderNo={}", userId, orderNo);
     }
 
     @Override
@@ -241,6 +299,7 @@ public class OrderServiceImpl implements OrderService {
                 .payType(order.getPayType())
                 .payTypeName(PayType.nameOf(order.getPayType()))
                 .paidTime(order.getPaidTime())
+                .trackingNo(order.getTrackingNo())
                 .receiverName(order.getReceiverName())
                 .receiverPhone(order.getReceiverPhone())
                 .receiverAddr(order.getReceiverAddr())
