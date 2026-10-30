@@ -59,7 +59,13 @@ security:
     expiration: 86400000
 
 app:
-  # 用户上传文件（头像）的落盘目录，相对启动目录
+  # 用户上传文件（头像）的落盘目录。
+  # 相对路径是相对「进程工作目录」解析的：
+  #   IDEA 直接运行 → 项目根目录/uploads
+  #   命令行在 recommend-server 下运行 → recommend-server/uploads
+  # 两处都跑过就会各留一份，旧头像在另一个实例里会 404。
+  # 想避免就设成绝对路径，例如 UPLOAD_DIR=D:/recommend/uploads
+  # 启动时会打印解析后的绝对路径，便于确认到底写到了哪里。
   upload-dir: ${UPLOAD_DIR:./uploads}
 
 order:

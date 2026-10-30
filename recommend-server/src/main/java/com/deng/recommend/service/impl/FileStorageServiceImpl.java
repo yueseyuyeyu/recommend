@@ -43,6 +43,9 @@ public class FileStorageServiceImpl implements FileStorageService {
 
     public FileStorageServiceImpl(@Value("${app.upload-dir:./uploads}") String uploadDir) {
         this.avatarDir = Paths.get(uploadDir).toAbsolutePath().normalize().resolve("avatar");
+        // 相对路径按进程工作目录解析，IDEA 运行与命令行运行会落到不同目录，
+        // 打印出来可以避免「换个方式启动后旧头像全 404」这种困惑
+        log.info("头像存储目录：{}", this.avatarDir);
     }
 
     @Override
