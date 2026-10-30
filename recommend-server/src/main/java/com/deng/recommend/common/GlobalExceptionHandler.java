@@ -6,6 +6,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -60,6 +61,19 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.OK)
     public Result<Void> handleNotReadableException(HttpMessageNotReadableException e) {
         return Result.fail(ResultCode.PARAM_ERROR.getCode(), "请求体格式错误");
+    }
+
+    /**
+     * 缺少必填的请求参数。
+     *
+     * <p>发生在进入 Controller 方法之前，业务代码拦不到；
+     * 不单独处理就会被包装成 9999，看不出是哪个参数没传。
+     */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    @ResponseStatus(HttpStatus.OK)
+    public Result<Void> handleMissingParameter(MissingServletRequestParameterException e) {
+        log.warn("缺少请求参数: {}", e.getParameterName());
+        return Result.fail(ResultCode.PARAM_ERROR.getCode(), "缺少必填参数: " + e.getParameterName());
     }
 
     /**
