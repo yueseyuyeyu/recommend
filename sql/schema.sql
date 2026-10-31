@@ -289,3 +289,19 @@ INSERT INTO `carousel` (`title`, `subtitle`, `bg_color`, `link_url`, `sort_order
 ('协同过滤 · 猜你喜欢', '看看和你兴趣相似的人都在买什么', 'linear-gradient(135deg,#1d976c,#93f9b9)', '/products', 2, 1),
 ('热门榜单', '近 30 天全站加权行为最高的商品', 'linear-gradient(135deg,#2193b0,#6dd5ed)', '/products?sort=sales', 3, 1),
 ('新品上架', '刚刚加入的商品，抢先体验', 'linear-gradient(135deg,#8e2de2,#4a00e0)', '/products', 4, 1);
+
+-- ----------------------------
+-- 14. 令牌黑名单表（服务端注销）
+--     JWT 签出去就收不回的补偿：注销时记下令牌摘要，鉴权命中即视为未登录
+-- ----------------------------
+DROP TABLE IF EXISTS `revoked_token`;
+CREATE TABLE `revoked_token` (
+  `id`          BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `token_hash`  CHAR(64)    NOT NULL                COMMENT '令牌 SHA-256 摘要（十六进制）',
+  `user_id`     BIGINT      NOT NULL                COMMENT '所属用户',
+  `expire_at`   DATETIME    NOT NULL                COMMENT '令牌自身过期时间，过期后本行可清理',
+  `create_time` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '注销时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_token_hash` (`token_hash`),
+  KEY `idx_expire_at` (`expire_at`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '已注销令牌黑名单';
