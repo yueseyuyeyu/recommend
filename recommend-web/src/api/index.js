@@ -3,6 +3,10 @@ import http from './http'
 /* ===== 认证 ===== */
 export const login = (data) => http.post('/auth/login', data)
 export const register = (data) => http.post('/auth/register', data)
+/** 服务端注销：把当前令牌加入黑名单，使其立即失效 */
+export const logout = () => http.post('/auth/logout')
+/** 修改密码（成功后当前令牌作废，需重新登录） */
+export const changePassword = (data) => http.put('/user/password', data)
 
 /* ===== 个人中心 ===== */
 export const getUserProfile = () => http.get('/user/profile')

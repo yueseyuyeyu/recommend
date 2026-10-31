@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import {
   getNotifications,
   getUnreadCount,
+  logout as logoutApi,
   markAllNotificationsRead,
   markNotificationRead
 } from './api'
@@ -45,7 +46,14 @@ watch(
   { immediate: true }
 )
 
-function handleLogout() {
+async function handleLogout() {
+  // 先请求服务端注销，让令牌进入黑名单立即失效。
+  // 网络不通也要保证本地能退出——否则用户会卡在"退不出去"的状态。
+  try {
+    await logoutApi()
+  } catch {
+    // 忽略：本地清理优先
+  }
   userStore.logout()
   favoriteStore.reset()
   notifications.value = []

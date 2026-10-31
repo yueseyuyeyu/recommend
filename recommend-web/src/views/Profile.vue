@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  changePassword,
   createAddress,
   deleteAddress,
   getAddresses,
@@ -269,6 +270,42 @@ async function handleSave() {
   }
 }
 
+/* ---------- 修改密码 ---------- */
+const pwdForm = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
+const pwdSaving = ref(false)
+
+async function handleChangePassword() {
+  if (!pwdForm.oldPassword) {
+    ElMessage.warning('请输入原密码')
+    return
+  }
+  if (!pwdForm.newPassword || pwdForm.newPassword.length < 6) {
+    ElMessage.warning('新密码至少 6 位')
+    return
+  }
+  if (pwdForm.newPassword !== pwdForm.confirmPassword) {
+    ElMessage.warning('两次输入的新密码不一致')
+    return
+  }
+
+  pwdSaving.value = true
+  try {
+    await changePassword({
+      oldPassword: pwdForm.oldPassword,
+      newPassword: pwdForm.newPassword
+    })
+    // 服务端已把当前令牌加入黑名单，本地同步清理后回登录页
+    ElMessage.success('密码已修改，请用新密码重新登录')
+    userStore.logout()
+    favoriteStore.reset()
+    router.push('/login')
+  } catch {
+    // 拦截器已提示（原密码错误等）
+  } finally {
+    pwdSaving.value = false
+  }
+}
+
 function openProduct(item) {
   router.push(`/products/${item.id}`)
 }
@@ -343,6 +380,47 @@ onMounted(() => {
         <el-form-item>
           <el-button type="primary" :loading="saving" @click="handleSave">保存资料</el-button>
           <el-button @click="loadAll">重置</el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <!-- ============ 修改密码 ============ -->
+    <el-card shadow="never" class="section-card">
+      <template #header><span class="card-title">修改密码</span></template>
+      <el-form label-width="88px" class="profile-form" @submit.prevent>
+        <el-form-item label="原密码">
+          <el-input
+            v-model="pwdForm.oldPassword"
+            type="password"
+            show-password
+            maxlength="20"
+            placeholder="用于确认是你本人操作"
+          />
+        </el-form-item>
+        <el-form-item label="新密码">
+          <el-input
+            v-model="pwdForm.newPassword"
+            type="password"
+            show-password
+            maxlength="20"
+            placeholder="6~20 位"
+          />
+        </el-form-item>
+        <el-form-item label="确认新密码">
+          <el-input
+            v-model="pwdForm.confirmPassword"
+            type="password"
+            show-password
+            maxlength="20"
+            placeholder="再输一次"
+            @keyup.enter="handleChangePassword"
+          />
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="pwdSaving" @click="handleChangePassword">
+            修改密码
+          </el-button>
+          <span class="pwd-hint">改完当前登录立即失效，需要用新密码重新登录</span>
         </el-form-item>
       </el-form>
     </el-card>
@@ -694,5 +772,11 @@ onMounted(() => {
   .stat-item {
     flex: 0 0 33.33%;
   }
+}
+/* 改密提示：贴在按钮右侧，说明会强制重新登录 */
+.pwd-hint {
+  margin-left: 12px;
+  font-size: 12px;
+  color: #909399;
 }
 </style>
