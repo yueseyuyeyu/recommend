@@ -3,19 +3,24 @@ package com.deng.recommend.controller;
 import com.deng.recommend.common.PageResult;
 import com.deng.recommend.common.Result;
 import com.deng.recommend.config.SecurityUtils;
+import com.deng.recommend.dto.ChangePasswordRequest;
 import com.deng.recommend.dto.UpdateProfileRequest;
 import com.deng.recommend.service.FileStorageService;
+import com.deng.recommend.service.TokenBlacklistService;
 import com.deng.recommend.service.UserProfileService;
 import com.deng.recommend.vo.HistoryVO;
 import com.deng.recommend.vo.UserStatsVO;
 import com.deng.recommend.vo.UserVO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
+import org.springframework.util.StringUtils;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -35,6 +40,7 @@ public class UserController {
 
     private final UserProfileService userProfileService;
     private final FileStorageService fileStorageService;
+    private final TokenBlacklistService tokenBlacklistService;
 
     /**
      * 上传头像。
@@ -67,6 +73,23 @@ public class UserController {
     @PutMapping("/profile")
     public Result<UserVO> updateProfile(@Valid @RequestBody UpdateProfileRequest request) {
         return Result.success(userProfileService.updateProfile(SecurityUtils.currentUserId(), request));
+    }
+
+    /**
+     * 修改密码。
+     *
+     * <p>成功后当前令牌会立即作废（加入黑名单），前端应引导重新登录——
+     * 改密后继续沿用旧令牌，等于改密没生效。
+     */
+    @PutMapping("/password")
+    public Result<Void> changePassword(
+            @Valid @RequestBody ChangePasswordRequest request,
+            @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization) {
+        userProfileService.changePassword(SecurityUtils.currentUserId(), request);
+        if (StringUtils.hasText(authorization) && authorization.startsWith("Bearer ")) {
+            tokenBlacklistService.revoke(authorization.substring(7));
+        }
+        return Result.success();
     }
 
     /**

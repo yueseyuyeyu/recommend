@@ -25,6 +25,7 @@ import com.deng.recommend.vo.UserStatsVO;
 import com.deng.recommend.vo.UserVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -52,6 +53,7 @@ public class UserProfileServiceImpl implements UserProfileService {
     private static final List<String> PURCHASE_TYPES = List.of("PURCHASE");
 
     private final UserMapper userMapper;
+    private final PasswordEncoder passwordEncoder;
     private final CartMapper cartMapper;
     private final OrderMapper orderMapper;
     private final ReviewMapper reviewMapper;
@@ -88,6 +90,26 @@ public class UserProfileServiceImpl implements UserProfileService {
         userMapper.updateById(user);
         log.info("用户资料已更新: userId={}", userId);
         return toUserVO(user);
+    }
+
+    @Override
+    public void changePassword(Long userId, com.deng.recommend.dto.ChangePasswordRequest request) {
+        User user = requireUser(userId);
+
+        // 原密码错了就拒绝：仅有令牌不足以证明身份
+        if (!passwordEncoder.matches(request.getOldPassword(), user.getPasswordHash())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "原密码不正确");
+        }
+        if (request.getNewPassword().equals(request.getOldPassword())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "新密码不能与原密码相同");
+        }
+
+        User update = new User();
+        update.setId(userId);
+        update.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        userMapper.updateById(update);
+
+        log.info("用户修改密码成功, userId={}", userId);
     }
 
     @Override

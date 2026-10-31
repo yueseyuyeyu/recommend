@@ -29,6 +29,17 @@ public interface UserProfileService {
     UserVO updateProfile(Long userId, UpdateProfileRequest request);
 
     /**
+     * 修改密码。
+     *
+     * <p>必须校验原密码：持有令牌不等于知道密码，否则令牌一旦泄露，
+     * 攻击者可以直接改密把真正的用户锁在外面。
+     *
+     * @param userId  当前用户
+     * @param request 原密码与新密码
+     */
+    void changePassword(Long userId, com.deng.recommend.dto.ChangePasswordRequest request);
+
+    /**
      * 个人中心顶部的待办数量：购物车、待付款、待发货、待收货、待评价。
      */
     UserStatsVO stats(Long userId);
