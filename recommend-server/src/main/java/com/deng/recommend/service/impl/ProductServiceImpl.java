@@ -36,9 +36,17 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ProductServiceImpl implements ProductService {
 
+    /** 类目名映射缓存时长：类目是低频变更数据，不必每次分页都全量查一遍 */
+    private static final long CATEGORY_NAME_CACHE_MS = 60_000L;
+
     private final ProductMapper productMapper;
     private final CategoryMapper categoryMapper;
     private final CategoryService categoryService;
+
+    /** 类目名映射快照；用整体替换而不是原地修改，保证读到的是一致视图 */
+    private volatile Map<Long, String> categoryNameCache;
+
+    private volatile long categoryNameCacheAt;
 
     @Override
     public PageResult<ProductVO> page(ProductQuery query, long pageNum, long pageSize) {
@@ -92,12 +100,18 @@ public class ProductServiceImpl implements ProductService {
                 .collect(Collectors.toCollection(ArrayList::new));
     }
 
-    /**
-     * 类目表规模很小（两级几十条），一次查全量做内存映射，避免逐行查库。
-     */
+    /** 类目变更后最多 60 秒自动生效；类目是低频数据，不做主动失效 */
     private Map<Long, String> loadCategoryNames() {
-        return categoryMapper.selectList(null).stream()
+        long now = System.currentTimeMillis();
+        Map<Long, String> cached = categoryNameCache;
+        if (cached != null && now - categoryNameCacheAt < CATEGORY_NAME_CACHE_MS) {
+            return cached;
+        }
+        Map<Long, String> loaded = categoryMapper.selectList(null).stream()
                 .collect(Collectors.toMap(Category::getId, Category::getName));
+        categoryNameCache = loaded;
+        categoryNameCacheAt = now;
+        return loaded;
     }
 
     private ProductVO toVO(Product product, Map<Long, String> categoryNames) {

@@ -18,6 +18,7 @@ import com.deng.recommend.mapper.OrderItemMapper;
 import com.deng.recommend.mapper.OrderMapper;
 import com.deng.recommend.mapper.ProductMapper;
 import com.deng.recommend.mapper.UserMapper;
+import com.deng.recommend.security.UserStatusCache;
 import com.deng.recommend.service.NotificationService;
 import com.deng.recommend.service.OrderService;
 import com.deng.recommend.service.OrderStatusLogService;
@@ -37,6 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -73,6 +75,9 @@ class AdminServiceImplTest {
     @Mock
     private NotificationService notificationService;
 
+    @Mock
+    private UserStatusCache userStatusCache;
+
     private AdminServiceImpl adminService;
 
     @BeforeEach
@@ -80,7 +85,8 @@ class AdminServiceImplTest {
         MybatisLambdaTestSupport.init();
         adminService = new AdminServiceImpl(
                 productMapper, categoryMapper, carouselMapper, userMapper, orderMapper, orderItemMapper,
-                behaviorMapper, orderService, orderStatusLogService, notificationService, new OrderProperties());
+                behaviorMapper, orderService, orderStatusLogService, notificationService, new OrderProperties(),
+                userStatusCache);
     }
 
     private static BusinessException catchBusinessException(ThrowingCallable callable) {
@@ -121,6 +127,16 @@ class AdminServiceImplTest {
 
         assertThat(ex.getCode()).isEqualTo(ResultCode.PARAM_ERROR.getCode());
         verifyNoInteractions(userMapper);
+    }
+
+    @Test
+    void updateUserStatus_success_evictsStatusCache() {
+        when(userMapper.update(isNull(), any(Wrapper.class))).thenReturn(1);
+
+        adminService.updateUserStatus(1L, 0);
+
+        // 禁用后立即清缓存，旧令牌不必等待缓存 TTL 才失效
+        verify(userStatusCache).evict(1L);
     }
 
     @Test

@@ -26,6 +26,7 @@ import com.deng.recommend.mapper.OrderItemMapper;
 import com.deng.recommend.mapper.OrderMapper;
 import com.deng.recommend.mapper.ProductMapper;
 import com.deng.recommend.mapper.UserMapper;
+import com.deng.recommend.security.UserStatusCache;
 import com.deng.recommend.service.AdminService;
 import com.deng.recommend.service.NotificationService;
 import com.deng.recommend.service.OrderService;
@@ -48,7 +49,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -74,6 +74,7 @@ public class AdminServiceImpl implements AdminService {
     private final OrderStatusLogService orderStatusLogService;
     private final NotificationService notificationService;
     private final OrderProperties orderProperties;
+    private final UserStatusCache userStatusCache;
 
     /** 类目最大层级：一级 → 二级 → 三级 */
     private static final int MAX_CATEGORY_LEVEL = 3;
@@ -208,6 +209,8 @@ public class AdminServiceImpl implements AdminService {
         if (affected == 0) {
             throw new BusinessException(ResultCode.NOT_FOUND, "用户不存在");
         }
+        // 禁用/启用后立刻让状态缓存失效，旧令牌无需等待缓存 TTL 才失效
+        userStatusCache.evict(id);
     }
 
     @Override
@@ -369,13 +372,8 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     public Map<String, Object> statistics() {
-        List<Product> products = productMapper.selectList(
-                new LambdaQueryWrapper<Product>().select(Product::getSales));
-        int totalSales = products.stream()
-                .map(Product::getSales)
-                .filter(Objects::nonNull)
-                .mapToInt(Integer::intValue)
-                .sum();
+        // 聚合在数据库完成：商品量大时不再把全表行拉进内存求和
+        long totalSales = productMapper.sumSales();
 
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("userCount", userMapper.selectCount(null));
