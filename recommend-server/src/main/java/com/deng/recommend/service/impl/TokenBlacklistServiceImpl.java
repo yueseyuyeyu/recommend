@@ -6,8 +6,8 @@ import com.deng.recommend.mapper.RevokedTokenMapper;
 import com.deng.recommend.security.JwtTokenProvider;
 import com.deng.recommend.service.TokenBlacklistService;
 import io.jsonwebtoken.Claims;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -20,6 +20,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 令牌黑名单实现：数据库为真值来源，内存缓存承载高频查询。
@@ -28,14 +29,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * 这对安全相关的状态不可接受，所以落库。
  *
  * <p><b>为什么还要内存缓存</b>：若每次请求都查库，等于给所有接口加一次 IO；
- * 黑名单只增不减（按过期时间清理），单机场景下内存集合与库完全一致，
- * 因此启动后懒加载一次、注销时同步写入即可。
+ * 无状态令牌本应「零查询」，黑名单只增加一次内存查表。
  *
- * <p>缓存条目自带过期时间：令牌过期后即使记录还在，也不应再拦截。
+ * <p><b>多实例一致性</b>：其他实例写入的注销记录本实例看不见，
+ * 因此每隔 {@code security.jwt.blacklist-reload-interval-ms} 做一次增量重载，
+ * 把库中新增的未过期记录并入内存。间隔越长，跨实例的注销生效越慢。
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class TokenBlacklistServiceImpl implements TokenBlacklistService {
 
     /** token 摘要 → 令牌过期时间 */
@@ -44,8 +45,23 @@ public class TokenBlacklistServiceImpl implements TokenBlacklistService {
     /** 是否已从数据库加载过；懒加载避免启动时依赖数据库可用 */
     private volatile boolean loaded = false;
 
+    /** 上次与数据库同步的时间戳，用于控制跨实例重载频率 */
+    private final AtomicLong lastReloadAt = new AtomicLong(0L);
+
+    /** 跨实例重载间隔（毫秒），<=0 表示只在启动时加载一次 */
+    private final long reloadIntervalMs;
+
     private final RevokedTokenMapper revokedTokenMapper;
     private final JwtTokenProvider tokenProvider;
+
+    public TokenBlacklistServiceImpl(RevokedTokenMapper revokedTokenMapper,
+                                     JwtTokenProvider tokenProvider,
+                                     @Value("${security.jwt.blacklist-reload-interval-ms:30000}")
+                                     long reloadIntervalMs) {
+        this.revokedTokenMapper = revokedTokenMapper;
+        this.tokenProvider = tokenProvider;
+        this.reloadIntervalMs = reloadIntervalMs;
+    }
 
     @Override
     public void revoke(String token) {
@@ -84,6 +100,8 @@ public class TokenBlacklistServiceImpl implements TokenBlacklistService {
         }
 
         revokedCache.put(hash, expireAt);
+        // 本实例刚同步过，重置计时，避免紧接着再查一次库
+        lastReloadAt.set(System.currentTimeMillis());
         log.info("令牌已注销, userId={}, 有效期至 {}", resolveUserId(claims), expireAt);
     }
 
@@ -93,6 +111,7 @@ public class TokenBlacklistServiceImpl implements TokenBlacklistService {
             return false;
         }
         ensureLoaded();
+        reloadIfStale();
 
         String hash = sha256(token);
         LocalDateTime expireAt = revokedCache.get(hash);
@@ -128,15 +147,50 @@ public class TokenBlacklistServiceImpl implements TokenBlacklistService {
             if (loaded) {
                 return;
             }
-            List<RevokedToken> rows = revokedTokenMapper.selectList(
-                    new LambdaQueryWrapper<RevokedToken>()
-                            .gt(RevokedToken::getExpireAt, LocalDateTime.now()));
+            List<RevokedToken> rows = loadActiveRecords();
             for (RevokedToken row : rows) {
                 revokedCache.put(row.getTokenHash(), row.getExpireAt());
             }
             loaded = true;
+            lastReloadAt.set(System.currentTimeMillis());
             log.info("令牌黑名单已加载 {} 条有效记录", rows.size());
         }
+    }
+
+    /**
+     * 增量重载其他实例写入的注销记录。
+     *
+     * <p>用 CAS 抢占本次重载权：多线程同时发现过期时只有一个真正查库，其余直接跳过。
+     * 重载只是 {@code putIfAbsent}，不覆盖本实例已写入的条目，也不会把已清理的记录带回来。
+     */
+    private void reloadIfStale() {
+        if (reloadIntervalMs <= 0) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        long last = lastReloadAt.get();
+        if (now - last < reloadIntervalMs) {
+            return;
+        }
+        if (!lastReloadAt.compareAndSet(last, now)) {
+            return;
+        }
+        try {
+            List<RevokedToken> rows = loadActiveRecords();
+            for (RevokedToken row : rows) {
+                revokedCache.putIfAbsent(row.getTokenHash(), row.getExpireAt());
+            }
+            log.debug("令牌黑名单增量重载完成，共 {} 条有效记录", rows.size());
+        } catch (Exception e) {
+            // 重载失败不影响本地已有黑名单，下个周期再试
+            log.warn("令牌黑名单增量重载失败: {}", e.getMessage());
+        }
+    }
+
+    /** 查询库中尚未过期的注销记录 */
+    private List<RevokedToken> loadActiveRecords() {
+        return revokedTokenMapper.selectList(new LambdaQueryWrapper<RevokedToken>()
+                .gt(RevokedToken::getExpireAt, LocalDateTime.now()));
     }
 
     private Long resolveUserId(Claims claims) {
