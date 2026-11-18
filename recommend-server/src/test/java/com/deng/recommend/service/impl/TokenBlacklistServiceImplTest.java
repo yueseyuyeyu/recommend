@@ -14,7 +14,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -23,7 +22,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 令牌黑名单单元测试：覆盖注销、幂等、跨实例重载与过期清理。
+ * 令牌黑名单单元测试：注销、幂等、跨实例点查、本地缓存窗口与过期清理。
  */
 @ExtendWith(MockitoExtension.class)
 class TokenBlacklistServiceImplTest {
@@ -43,11 +42,11 @@ class TokenBlacklistServiceImplTest {
         tokenProvider = new JwtTokenProvider(SECRET, ONE_HOUR);
     }
 
-    private TokenBlacklistServiceImpl service(long reloadIntervalMs) {
-        return new TokenBlacklistServiceImpl(revokedTokenMapper, tokenProvider, reloadIntervalMs);
+    private TokenBlacklistServiceImpl service(long cacheTtlMs) {
+        return new TokenBlacklistServiceImpl(revokedTokenMapper, tokenProvider, cacheTtlMs);
     }
 
-    /** 与实现保持一致的摘要算法，用于断言与构造“其他实例写入的记录” */
+    /** 与实现保持一致的摘要算法，用于断言写入内容 */
     private static String sha256(String token) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         byte[] bytes = digest.digest(token.getBytes(StandardCharsets.UTF_8));
@@ -59,19 +58,10 @@ class TokenBlacklistServiceImplTest {
         return sb.toString();
     }
 
-    private static RevokedToken revokedRow(String hash) {
-        RevokedToken row = new RevokedToken();
-        row.setTokenHash(hash);
-        row.setUserId(1L);
-        row.setExpireAt(LocalDateTime.now().plusHours(1));
-        return row;
-    }
-
     @Test
     void revoke_thenIsRevoked_returnsTrueAndStoresHash() throws Exception {
-        when(revokedTokenMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
         when(revokedTokenMapper.insert(any(RevokedToken.class))).thenReturn(1);
-        TokenBlacklistServiceImpl blacklist = service(30_000L);
+        TokenBlacklistServiceImpl blacklist = service(1000L);
 
         String token = tokenProvider.generateToken(1L, "user001", "USER");
         blacklist.revoke(token);
@@ -80,18 +70,19 @@ class TokenBlacklistServiceImplTest {
 
         ArgumentCaptor<RevokedToken> captor = ArgumentCaptor.forClass(RevokedToken.class);
         verify(revokedTokenMapper).insert(captor.capture());
-        // 只存摘要，不存明文令牌
         assertThat(captor.getValue().getTokenHash())
                 .hasSize(64)
                 .isEqualTo(sha256(token))
                 .isNotEqualTo(token);
         assertThat(captor.getValue().getExpireAt()).isAfter(LocalDateTime.now());
+        // 本实例注销后直接用本地判定，不再回查数据库
+        verify(revokedTokenMapper, times(0)).selectCount(any(Wrapper.class));
     }
 
     @Test
     void revoke_sameTokenTwice_insertsOnce() {
         when(revokedTokenMapper.insert(any(RevokedToken.class))).thenReturn(1);
-        TokenBlacklistServiceImpl blacklist = service(30_000L);
+        TokenBlacklistServiceImpl blacklist = service(1000L);
 
         String token = tokenProvider.generateToken(1L, "user001", "USER");
         blacklist.revoke(token);
@@ -102,55 +93,67 @@ class TokenBlacklistServiceImplTest {
 
     @Test
     void revoke_expiredToken_isIgnored() {
-        TokenBlacklistServiceImpl blacklist = service(30_000L);
-        String expired = tokenProvider.generateToken(1L, "user001", "USER");
-        // 用另一个已过期签发器生成令牌，模拟过期令牌
+        TokenBlacklistServiceImpl blacklist = service(1000L);
+        String valid = tokenProvider.generateToken(1L, "user001", "USER");
         JwtTokenProvider expiredProvider = new JwtTokenProvider(SECRET, -1000L);
-        String reallyExpired = expiredProvider.generateToken(1L, "user001", "USER");
+        String expired = expiredProvider.generateToken(1L, "user001", "USER");
 
+        blacklist.revoke(valid);
         blacklist.revoke(expired);
-        blacklist.revoke(reallyExpired);
 
-        // 第一个有效令牌会写库一次；过期令牌不写
+        // 有效令牌写库一次；过期令牌本身已不可用，不写
         verify(revokedTokenMapper, times(1)).insert(any(RevokedToken.class));
     }
 
     @Test
-    void isRevoked_tokenRevokedByAnotherInstance_isVisibleAfterReload() throws Exception {
+    void isRevoked_revokedByAnotherInstance_isVisibleImmediately() throws Exception {
+        // 本实例内存里没有这条记录，但库里有（另一个实例注销的）
+        when(revokedTokenMapper.selectCount(any(Wrapper.class))).thenReturn(1L);
+        TokenBlacklistServiceImpl blacklist = service(1000L);
         String token = tokenProvider.generateToken(2L, "user002", "USER");
-        // 初始库中为空：本实例加载后看不到任何注销记录
-        when(revokedTokenMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
-        TokenBlacklistServiceImpl blacklist = service(1L);
-
-        assertThat(blacklist.isRevoked(token)).isFalse();
-
-        // 模拟另一实例写入注销记录，本实例只能通过定期重载看到它
-        when(revokedTokenMapper.selectList(any(Wrapper.class)))
-                .thenReturn(List.of(revokedRow(sha256(token))));
-        Thread.sleep(20L);
 
         assertThat(blacklist.isRevoked(token)).isTrue();
+        verify(revokedTokenMapper).selectCount(any(Wrapper.class));
     }
 
     @Test
-    void isRevoked_reloadDisabled_doesNotSeeOtherInstances() throws Exception {
+    void isRevoked_twiceWithinCacheTtl_queriesDatabaseOnce() {
+        when(revokedTokenMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
+        TokenBlacklistServiceImpl blacklist = service(1000L);
         String token = tokenProvider.generateToken(3L, "user003", "USER");
-        when(revokedTokenMapper.selectList(any(Wrapper.class))).thenReturn(List.of());
-        TokenBlacklistServiceImpl blacklist = service(0L);
 
         assertThat(blacklist.isRevoked(token)).isFalse();
-
-        Thread.sleep(20L);
-
-        // 关闭重载后只认启动时加载的那一份，期间不再查库
         assertThat(blacklist.isRevoked(token)).isFalse();
-        verify(revokedTokenMapper, times(1)).selectList(any(Wrapper.class));
+
+        verify(revokedTokenMapper, times(1)).selectCount(any(Wrapper.class));
     }
 
     @Test
-    void purgeExpired_deletesExpiredRows() {
+    void isRevoked_cacheDisabled_queriesEveryTime() {
+        when(revokedTokenMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
+        TokenBlacklistServiceImpl blacklist = service(0L);
+        String token = tokenProvider.generateToken(4L, "user004", "USER");
+
+        blacklist.isRevoked(token);
+        blacklist.isRevoked(token);
+
+        verify(revokedTokenMapper, times(2)).selectCount(any(Wrapper.class));
+    }
+
+    @Test
+    void isRevoked_dbError_treatsAsNotRevoked() {
+        when(revokedTokenMapper.selectCount(any(Wrapper.class))).thenThrow(new RuntimeException("db down"));
+        TokenBlacklistServiceImpl blacklist = service(0L);
+        String token = tokenProvider.generateToken(5L, "user005", "USER");
+
+        // 数据库抖动不能把所有在线用户都踢下线
+        assertThat(blacklist.isRevoked(token)).isFalse();
+    }
+
+    @Test
+    void purgeExpired_deletesExpiredRowsAndClearsLocalCache() {
         when(revokedTokenMapper.delete(any(Wrapper.class))).thenReturn(3);
-        TokenBlacklistServiceImpl blacklist = service(30_000L);
+        TokenBlacklistServiceImpl blacklist = service(1000L);
 
         assertThat(blacklist.purgeExpired()).isEqualTo(3);
         verify(revokedTokenMapper).delete(any(Wrapper.class));

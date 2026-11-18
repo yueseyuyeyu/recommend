@@ -17,50 +17,54 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Date;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 令牌黑名单实现：数据库为真值来源，内存缓存承载高频查询。
+ * 令牌黑名单实现：数据库为唯一真值来源，本地只做「秒级」结果缓存。
  *
- * <p><b>为什么不用纯内存</b>：进程重启后内存清空，已注销的令牌会「复活」到过期为止，
- * 这对安全相关的状态不可接受，所以落库。
+ * <p><b>为什么不再用启动时全量加载 + 定期重载</b>：那种做法在多实例下，
+ * A 实例的注销要等 B 实例下一次重载才生效，延迟等于重载间隔；
+ * 且每个实例都要把整张表灌进内存。
  *
- * <p><b>为什么还要内存缓存</b>：若每次请求都查库，等于给所有接口加一次 IO；
- * 无状态令牌本应「零查询」，黑名单只增加一次内存查表。
+ * <p><b>现在的策略</b>：判定时按 {@code token_hash} 点查数据库（唯一索引，成本极低），
+ * 结果在本地缓存 {@code security.jwt.blacklist-cache-ttl-ms}（默认 1000ms）。
+ * 因此：
+ * <ul>
+ *   <li>跨实例注销的生效延迟上界 = 缓存 TTL（默认 1 秒），满足「秒级一致」；</li>
+ *   <li>同一令牌在一秒内的重复请求只查一次库，不会给每个请求都加 IO；</li>
+ *   <li>不再需要把整表加载进内存，实例内存占用与注销总量无关。</li>
+ * </ul>
  *
- * <p><b>多实例一致性</b>：其他实例写入的注销记录本实例看不见，
- * 因此每隔 {@code security.jwt.blacklist-reload-interval-ms} 做一次增量重载，
- * 把库中新增的未过期记录并入内存。间隔越长，跨实例的注销生效越慢。
+ * <p>缓存同时保存「已注销」与「未注销」两种判定，避免被频繁探测的无效令牌反复查库。
+ * 把 TTL 设为 0 可退化为每次请求直查数据库（强一致、零延迟）。
  */
 @Slf4j
 @Service
 public class TokenBlacklistServiceImpl implements TokenBlacklistService {
 
-    /** token 摘要 → 令牌过期时间 */
-    private final Map<String, LocalDateTime> revokedCache = new ConcurrentHashMap<>();
+    /** 本地判定缓存上限，超过整体清空，防止被大量随机令牌撑爆内存 */
+    private static final int MAX_LOCAL_ENTRIES = 10_000;
 
-    /** 是否已从数据库加载过；懒加载避免启动时依赖数据库可用 */
-    private volatile boolean loaded = false;
+    /** token 摘要 → 判定结果（含有效期） */
+    private final Map<String, CachedVerdict> localCache = new ConcurrentHashMap<>();
 
-    /** 上次与数据库同步的时间戳，用于控制跨实例重载频率 */
-    private final AtomicLong lastReloadAt = new AtomicLong(0L);
-
-    /** 跨实例重载间隔（毫秒），<=0 表示只在启动时加载一次 */
-    private final long reloadIntervalMs;
+    /** 判定结果缓存时长（毫秒）；<=0 表示不缓存，每次直查数据库 */
+    private final long cacheTtlMs;
 
     private final RevokedTokenMapper revokedTokenMapper;
     private final JwtTokenProvider tokenProvider;
 
     public TokenBlacklistServiceImpl(RevokedTokenMapper revokedTokenMapper,
                                      JwtTokenProvider tokenProvider,
-                                     @Value("${security.jwt.blacklist-reload-interval-ms:30000}")
-                                     long reloadIntervalMs) {
+                                     @Value("${security.jwt.blacklist-cache-ttl-ms:1000}") long cacheTtlMs) {
         this.revokedTokenMapper = revokedTokenMapper;
         this.tokenProvider = tokenProvider;
-        this.reloadIntervalMs = reloadIntervalMs;
+        this.cacheTtlMs = cacheTtlMs;
+    }
+
+    /** 缓存条目：是否已注销 + 该判定何时过期 */
+    private record CachedVerdict(boolean revoked, long expireAt) {
     }
 
     @Override
@@ -80,14 +84,14 @@ public class TokenBlacklistServiceImpl implements TokenBlacklistService {
         }
 
         String hash = sha256(token);
-        LocalDateTime expireAt = LocalDateTime.ofInstant(
-                Instant.ofEpochMilli(expiration.getTime()), ZoneId.systemDefault());
-
-        // 先查缓存，重复注销直接返回，省一次数据库往返
-        if (revokedCache.containsKey(hash)) {
+        CachedVerdict cached = localCache.get(hash);
+        if (cached != null && cached.revoked()) {
+            // 本实例已判定注销，幂等返回
             return;
         }
 
+        LocalDateTime expireAt = LocalDateTime.ofInstant(
+                Instant.ofEpochMilli(expiration.getTime()), ZoneId.systemDefault());
         try {
             RevokedToken record = new RevokedToken();
             record.setTokenHash(hash);
@@ -96,12 +100,11 @@ public class TokenBlacklistServiceImpl implements TokenBlacklistService {
             revokedTokenMapper.insert(record);
         } catch (Exception e) {
             // 唯一索引冲突（并发重复注销）可忽略；其他异常也不应让退出登录失败
-            log.warn("写入令牌黑名单失败，本次仅内存生效: {}", e.getMessage());
+            log.warn("写入令牌黑名单失败，本次仅本地生效: {}", e.getMessage());
         }
 
-        revokedCache.put(hash, expireAt);
-        // 本实例刚同步过，重置计时，避免紧接着再查一次库
-        lastReloadAt.set(System.currentTimeMillis());
+        // 本实例立刻生效：缓存到令牌自身过期为止，不必再查库
+        localCache.put(hash, new CachedVerdict(true, expiration.getTime()));
         log.info("令牌已注销, userId={}, 有效期至 {}", resolveUserId(claims), expireAt);
     }
 
@@ -110,87 +113,58 @@ public class TokenBlacklistServiceImpl implements TokenBlacklistService {
         if (token == null || token.isEmpty()) {
             return false;
         }
-        ensureLoaded();
-        reloadIfStale();
-
         String hash = sha256(token);
-        LocalDateTime expireAt = revokedCache.get(hash);
-        if (expireAt == null) {
-            return false;
+        long now = System.currentTimeMillis();
+
+        CachedVerdict cached = localCache.get(hash);
+        if (cached != null && cached.expireAt() > now) {
+            return cached.revoked();
         }
-        // 令牌已过期，记录留着也没意义，顺手清掉
-        if (expireAt.isBefore(LocalDateTime.now())) {
-            revokedCache.remove(hash);
-            return false;
-        }
-        return true;
+
+        boolean revoked = existsActiveRecord(hash);
+        putVerdict(hash, revoked, now);
+        return revoked;
     }
 
     @Override
     public int purgeExpired() {
-        LocalDateTime now = LocalDateTime.now();
         int deleted = revokedTokenMapper.delete(new LambdaQueryWrapper<RevokedToken>()
-                .lt(RevokedToken::getExpireAt, now));
-        revokedCache.entrySet().removeIf(e -> e.getValue().isBefore(now));
+                .lt(RevokedToken::getExpireAt, LocalDateTime.now()));
+        // 过期记录已删除，本地判定一并作废，避免继续用旧结果
+        localCache.clear();
         if (deleted > 0) {
             log.info("清理过期令牌黑名单 {} 条", deleted);
         }
         return deleted;
     }
 
-    /** 首次访问时把库中未过期的记录加载进内存 */
-    private void ensureLoaded() {
-        if (loaded) {
-            return;
-        }
-        synchronized (this) {
-            if (loaded) {
-                return;
-            }
-            List<RevokedToken> rows = loadActiveRecords();
-            for (RevokedToken row : rows) {
-                revokedCache.put(row.getTokenHash(), row.getExpireAt());
-            }
-            loaded = true;
-            lastReloadAt.set(System.currentTimeMillis());
-            log.info("令牌黑名单已加载 {} 条有效记录", rows.size());
-        }
-    }
-
     /**
-     * 增量重载其他实例写入的注销记录。
+     * 查库判断是否存在未过期的注销记录。
      *
-     * <p>用 CAS 抢占本次重载权：多线程同时发现过期时只有一个真正查库，其余直接跳过。
-     * 重载只是 {@code putIfAbsent}，不覆盖本实例已写入的条目，也不会把已清理的记录带回来。
+     * <p>用 {@code token_hash} 唯一索引点查，并顺带过滤 {@code expire_at}：
+     * 即使清理任务还没跑，过期记录也不会误伤。
      */
-    private void reloadIfStale() {
-        if (reloadIntervalMs <= 0) {
-            return;
-        }
-        long now = System.currentTimeMillis();
-        long last = lastReloadAt.get();
-        if (now - last < reloadIntervalMs) {
-            return;
-        }
-        if (!lastReloadAt.compareAndSet(last, now)) {
-            return;
-        }
+    private boolean existsActiveRecord(String hash) {
         try {
-            List<RevokedToken> rows = loadActiveRecords();
-            for (RevokedToken row : rows) {
-                revokedCache.putIfAbsent(row.getTokenHash(), row.getExpireAt());
-            }
-            log.debug("令牌黑名单增量重载完成，共 {} 条有效记录", rows.size());
+            Long count = revokedTokenMapper.selectCount(new LambdaQueryWrapper<RevokedToken>()
+                    .eq(RevokedToken::getTokenHash, hash)
+                    .gt(RevokedToken::getExpireAt, LocalDateTime.now()));
+            return count != null && count > 0;
         } catch (Exception e) {
-            // 重载失败不影响本地已有黑名单，下个周期再试
-            log.warn("令牌黑名单增量重载失败: {}", e.getMessage());
+            // 数据库抖动时按「未注销」放行：注销是安全增强，不能因此让所有请求 401
+            log.warn("查询令牌黑名单失败，按未注销处理: {}", e.getMessage());
+            return false;
         }
     }
 
-    /** 查询库中尚未过期的注销记录 */
-    private List<RevokedToken> loadActiveRecords() {
-        return revokedTokenMapper.selectList(new LambdaQueryWrapper<RevokedToken>()
-                .gt(RevokedToken::getExpireAt, LocalDateTime.now()));
+    private void putVerdict(String hash, boolean revoked, long now) {
+        if (cacheTtlMs <= 0) {
+            return;
+        }
+        if (localCache.size() > MAX_LOCAL_ENTRIES) {
+            localCache.clear();
+        }
+        localCache.put(hash, new CachedVerdict(revoked, now + cacheTtlMs));
     }
 
     private Long resolveUserId(Claims claims) {

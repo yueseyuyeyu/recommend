@@ -22,12 +22,12 @@ import java.io.IOException;
 /**
  * JWT 鉴权过滤器：解析 {@code Authorization: Bearer <token>} 并建立安全上下文。
  *
- * <p>只信任令牌内的信息，<b>不查业务数据库</b>。唯一的额外判断是令牌黑名单——
- * 那是「服务端注销」必需的：黑名单常驻内存，注销时同步写入，
- * 所以每个请求仍然只有一次内存查表，没有 IO。
- *
- * <p>未做「用户被禁用即时生效」：禁用后旧令牌仍可用至过期（24h）。
- * 若需要，可对用户状态做同样的内存态校验。
+ * <p>只信任令牌内的信息，<b>不查业务数据库</b>。两个例外都与安全相关：
+ * <ul>
+ *   <li>令牌黑名单：支撑「服务端注销」，判定结果本地缓存 1 秒，跨实例秒级一致；</li>
+ *   <li>用户状态：支撑「禁用即时生效」，管理员禁用后旧令牌最多 1 秒失效。</li>
+ * </ul>
+ * 两者都是一次点查 + 短缓存，不会给每个请求都加固定的 IO。
  */
 @Slf4j
 @Component
@@ -36,6 +36,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider tokenProvider;
     private final TokenBlacklistService tokenBlacklistService;
+    private final UserStatusCache userStatusCache;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -57,6 +58,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         ? null : claims.get("uid", Number.class).longValue();
                 String username = claims.getSubject();
                 String roleName = claims.get("role", String.class);
+
+                // 用户被禁用或删除后，已签发的令牌最多再存活一个缓存 TTL（默认 1 秒）
+                if (!userStatusCache.isActive(userId)) {
+                    log.debug("用户已禁用或不存在，跳过鉴权: userId={}", userId);
+                    SecurityContextHolder.clearContext();
+                    filterChain.doFilter(request, response);
+                    return;
+                }
+
                 UserPrincipal principal = new UserPrincipal(
                         userId, username, null, UserRole.valueOf(roleName), true);
 
