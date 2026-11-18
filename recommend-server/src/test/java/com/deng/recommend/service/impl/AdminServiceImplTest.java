@@ -5,17 +5,22 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.deng.recommend.common.BusinessException;
 import com.deng.recommend.common.PageResult;
 import com.deng.recommend.common.ResultCode;
+import com.deng.recommend.config.OrderProperties;
 import com.deng.recommend.entity.Category;
 import com.deng.recommend.entity.Order;
 import com.deng.recommend.entity.Product;
 import com.deng.recommend.entity.User;
 import com.deng.recommend.entity.enums.OrderStatus;
 import com.deng.recommend.mapper.BehaviorMapper;
+import com.deng.recommend.mapper.CarouselMapper;
 import com.deng.recommend.mapper.CategoryMapper;
 import com.deng.recommend.mapper.OrderItemMapper;
 import com.deng.recommend.mapper.OrderMapper;
 import com.deng.recommend.mapper.ProductMapper;
 import com.deng.recommend.mapper.UserMapper;
+import com.deng.recommend.service.NotificationService;
+import com.deng.recommend.service.OrderService;
+import com.deng.recommend.service.OrderStatusLogService;
 import com.deng.recommend.support.MybatisLambdaTestSupport;
 import com.deng.recommend.vo.ProductVO;
 import com.deng.recommend.vo.UserVO;
@@ -56,13 +61,26 @@ class AdminServiceImplTest {
     @Mock
     private BehaviorMapper behaviorMapper;
 
+    @Mock
+    private CarouselMapper carouselMapper;
+
+    @Mock
+    private OrderService orderService;
+
+    @Mock
+    private OrderStatusLogService orderStatusLogService;
+
+    @Mock
+    private NotificationService notificationService;
+
     private AdminServiceImpl adminService;
 
     @BeforeEach
     void setUp() {
         MybatisLambdaTestSupport.init();
         adminService = new AdminServiceImpl(
-                productMapper, categoryMapper, userMapper, orderMapper, orderItemMapper, behaviorMapper);
+                productMapper, categoryMapper, carouselMapper, userMapper, orderMapper, orderItemMapper,
+                behaviorMapper, orderService, orderStatusLogService, notificationService, new OrderProperties());
     }
 
     private static BusinessException catchBusinessException(ThrowingCallable callable) {

@@ -60,8 +60,12 @@ class JwtTokenProviderTest {
     void validateToken_tamperedToken_returnsFalse() {
         JwtTokenProvider provider = new JwtTokenProvider(VALID_SECRET, ONE_HOUR);
         String token = provider.generateToken(7L, "user001", "USER");
-        String tampered = token.substring(0, token.length() - 1)
-                + (token.endsWith("A") ? "B" : "A");
+        // 篡改签名段的首字符：末位字符可能只是 Base64 填充位，改动后解码结果不变，
+        // 那样即使令牌被改过也能通过校验，测不出真实问题
+        String[] parts = token.split("\\.");
+        char first = parts[2].charAt(0);
+        char replaced = first == 'A' ? 'B' : 'A';
+        String tampered = parts[0] + "." + parts[1] + "." + replaced + parts[2].substring(1);
 
         assertThat(provider.validateToken(tampered)).isFalse();
     }

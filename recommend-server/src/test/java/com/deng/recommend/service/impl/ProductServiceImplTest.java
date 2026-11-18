@@ -10,6 +10,7 @@ import com.deng.recommend.entity.Category;
 import com.deng.recommend.entity.Product;
 import com.deng.recommend.mapper.CategoryMapper;
 import com.deng.recommend.mapper.ProductMapper;
+import com.deng.recommend.service.CategoryService;
 import com.deng.recommend.support.MybatisLambdaTestSupport;
 import com.deng.recommend.vo.ProductVO;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
@@ -40,12 +41,15 @@ class ProductServiceImplTest {
     @Mock
     private CategoryMapper categoryMapper;
 
+    @Mock
+    private CategoryService categoryService;
+
     private ProductServiceImpl productService;
 
     @BeforeEach
     void setUp() {
         MybatisLambdaTestSupport.init();
-        productService = new ProductServiceImpl(productMapper, categoryMapper);
+        productService = new ProductServiceImpl(productMapper, categoryMapper, categoryService);
     }
 
     private static BusinessException catchBusinessException(ThrowingCallable callable) {

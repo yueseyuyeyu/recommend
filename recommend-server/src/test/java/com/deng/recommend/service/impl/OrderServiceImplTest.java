@@ -16,6 +16,10 @@ import com.deng.recommend.mapper.CartMapper;
 import com.deng.recommend.mapper.OrderItemMapper;
 import com.deng.recommend.mapper.OrderMapper;
 import com.deng.recommend.mapper.ProductMapper;
+import com.deng.recommend.service.AddressService;
+import com.deng.recommend.service.NotificationService;
+import com.deng.recommend.service.OrderStatusLogService;
+import com.deng.recommend.support.MybatisLambdaTestSupport;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -57,11 +61,22 @@ class OrderServiceImplTest {
     @Mock
     private BehaviorMapper behaviorMapper;
 
+    @Mock
+    private AddressService addressService;
+
+    @Mock
+    private OrderStatusLogService orderStatusLogService;
+
+    @Mock
+    private NotificationService notificationService;
+
     private OrderServiceImpl orderService;
 
     @BeforeEach
     void setUp() {
-        orderService = new OrderServiceImpl(orderMapper, orderItemMapper, cartMapper, productMapper, behaviorMapper);
+        MybatisLambdaTestSupport.init();
+        orderService = new OrderServiceImpl(orderMapper, orderItemMapper, cartMapper, productMapper,
+                behaviorMapper, addressService, orderStatusLogService, notificationService);
     }
 
     private static BusinessException catchBusinessException(ThrowingCallable callable) {
