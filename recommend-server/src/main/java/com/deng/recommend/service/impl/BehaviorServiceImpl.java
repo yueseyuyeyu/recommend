@@ -78,6 +78,9 @@ public class BehaviorServiceImpl implements BehaviorService {
         behavior.setRating(rating);
         behavior.setCreatedAt(LocalDateTime.now());
         behaviorMapper.insert(behavior);
+        // 新行为必须尽快反映到推荐里：只靠 TTL 自然过期，用户会在一段时间内看到旧结果。
+        // 主动失效只让下一次请求重建一次矩阵，代价远小于"推荐像没更新"。
+        invalidateMatrixCache("行为上报");
     }
 
     @Override
@@ -113,7 +116,20 @@ public class BehaviorServiceImpl implements BehaviorService {
 
     @Override
     public void evictMatrixCache() {
-        matrixCache.clear();
+        invalidateMatrixCache("手动刷新");
         log.info("行为矩阵缓存已手动清除");
+    }
+
+    /**
+     * 清空矩阵缓存。
+     *
+     * @param reason 触发原因，仅用于日志区分"上报失效"与"手动刷新"
+     */
+    private void invalidateMatrixCache(String reason) {
+        if (matrixCache.isEmpty()) {
+            return;
+        }
+        matrixCache.clear();
+        log.debug("行为矩阵缓存已失效，原因：{}", reason);
     }
 }

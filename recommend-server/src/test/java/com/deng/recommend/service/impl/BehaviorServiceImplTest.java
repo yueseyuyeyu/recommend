@@ -16,10 +16,13 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -119,5 +122,35 @@ class BehaviorServiceImplTest {
         assertThat(behavior.getWeight()).isEqualTo(1.0);
         assertThat(behavior.getRating()).isNull();
         assertThat(behavior.getCreatedAt()).isNotNull();
+    }
+
+    @Test
+    void report_success_invalidatesCachedMatrix() {
+        // 第一次构建把矩阵放进缓存
+        when(behaviorMapper.selectBehaviorRecords(null, 200000)).thenReturn(List.of());
+        behaviorService.buildMatrix(null);
+        verify(behaviorMapper, times(1)).selectBehaviorRecords(null, 200000);
+
+        // 缓存命中：不重复查库
+        behaviorService.buildMatrix(null);
+        verify(behaviorMapper, times(1)).selectBehaviorRecords(null, 200000);
+
+        // 上报新行为后缓存必须失效，下次构建重新查库
+        when(productMapper.selectById(100L)).thenReturn(product());
+        when(behaviorMapper.insert(any(Behavior.class))).thenReturn(1);
+        behaviorService.report(1L, request("VIEW", null));
+
+        behaviorService.buildMatrix(null);
+        verify(behaviorMapper, times(2)).selectBehaviorRecords(null, 200000);
+    }
+
+    @Test
+    void buildMatrix_cacheHit_doesNotQueryAgain() {
+        when(behaviorMapper.selectBehaviorRecords(null, 200000)).thenReturn(List.of());
+
+        behaviorService.buildMatrix(null);
+        behaviorService.buildMatrix(null);
+
+        verify(behaviorMapper, times(1)).selectBehaviorRecords(null, 200000);
     }
 }
