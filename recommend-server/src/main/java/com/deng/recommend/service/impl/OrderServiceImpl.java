@@ -300,11 +300,16 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * 执行取消：校验可取消状态、回滚库存、置为已取消。
+     * 执行取消：先抢占状态、再回滚库存、最后写日志。
      *
      * <p>抽成私有方法是因为用户主动取消和定时任务自动取消都要走同一套逻辑。
      * 注意不能在这里再调 {@code cancel()}——同类内部调用不会经过 Spring 代理，
      * {@code @Transactional} 会失效。
+     *
+     * <p><b>为什么先更新状态再回滚库存</b>：并发取消（用户连点、用户与定时任务同时触发）时，
+     * 先读状态再回滚的写法会让两个请求都通过校验，各回滚一次，库存凭空变多。
+     * 这里用「带状态条件的 UPDATE」抢占取消权：影响行数为 0 说明已被别的请求取消，
+     * 直接失败，只有真正把状态改成 CANCELLED 的那一次才回滚库存。
      */
     private void doCancel(Order order, OperatorType operatorType, Long operatorId,
                           String operatorName, String remark) {
@@ -315,6 +320,15 @@ public class OrderServiceImpl implements OrderService {
         Integer fromStatus = order.getStatus();
         String orderNo = order.getOrderNo();
 
+        int affected = orderMapper.update(null, new LambdaUpdateWrapper<Order>()
+                .eq(Order::getId, order.getId())
+                .in(Order::getStatus, OrderStatus.PENDING.getCode(), OrderStatus.PAID.getCode())
+                .set(Order::getStatus, OrderStatus.CANCELLED.getCode()));
+        if (affected == 0) {
+            // 没有抢到取消权：并发请求已经取消或状态已被推进
+            throw new BusinessException(ResultCode.ORDER_NOT_CANCELLABLE);
+        }
+
         List<OrderItem> items = orderItemMapper.selectList(
                 new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderNo, orderNo));
         for (OrderItem item : items) {
@@ -323,11 +337,6 @@ public class OrderServiceImpl implements OrderService {
                     .setSql("stock = stock + " + item.getQuantity());
             productMapper.update(null, wrapper);
         }
-
-        Order update = new Order();
-        update.setId(order.getId());
-        update.setStatus(OrderStatus.CANCELLED.getCode());
-        orderMapper.updateById(update);
 
         orderStatusLogService.record(orderNo, fromStatus, OrderStatus.CANCELLED.getCode(),
                 operatorType, operatorId, operatorName, remark);

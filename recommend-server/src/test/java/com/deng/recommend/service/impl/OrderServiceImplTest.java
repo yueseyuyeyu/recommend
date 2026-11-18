@@ -225,17 +225,29 @@ class OrderServiceImplTest {
     @Test
     void cancel_pendingOrder_restoresStockAndUpdatesStatus() {
         when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(order("NO1", OrderStatus.PENDING.getCode()));
+        when(orderMapper.update(isNull(), any(Wrapper.class))).thenReturn(1);
         when(orderItemMapper.selectList(any(Wrapper.class))).thenReturn(List.of(orderItem(100L, 3)));
         when(productMapper.update(isNull(), any(Wrapper.class))).thenReturn(1);
 
         orderService.cancel(1L, "NO1");
 
         verify(productMapper).update(isNull(), any(Wrapper.class));
+        // 状态更新走带条件的 UPDATE，不再用 updateById
+        verify(orderMapper).update(isNull(), any(Wrapper.class));
+        verify(orderMapper, never()).updateById(any(Order.class));
+    }
 
-        ArgumentCaptor<Order> captor = ArgumentCaptor.forClass(Order.class);
-        verify(orderMapper).updateById(captor.capture());
-        assertThat(captor.getValue().getId()).isEqualTo(1L);
-        assertThat(captor.getValue().getStatus()).isEqualTo(OrderStatus.CANCELLED.getCode());
+    @Test
+    void cancel_concurrentAlreadyCancelled_doesNotRestoreStockTwice() {
+        // 先读到待支付，但条件更新时已被其他请求改成已取消（影响行数 0）
+        when(orderMapper.selectOne(any(Wrapper.class))).thenReturn(order("NO1", OrderStatus.PENDING.getCode()));
+        when(orderMapper.update(isNull(), any(Wrapper.class))).thenReturn(0);
+
+        BusinessException ex = catchBusinessException(() -> orderService.cancel(1L, "NO1"));
+
+        assertThat(ex.getCode()).isEqualTo(ResultCode.ORDER_NOT_CANCELLABLE.getCode());
+        verify(productMapper, never()).update(isNull(), any(Wrapper.class));
+        verify(orderItemMapper, never()).selectList(any(Wrapper.class));
     }
 
     @Test
