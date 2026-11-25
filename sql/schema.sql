@@ -149,7 +149,11 @@ CREATE TABLE `orders` (
   `update_time`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_order_no` (`order_no`),
-  KEY `idx_user_status` (`user_id`, `status`)
+  KEY `idx_user_status` (`user_id`, `status`),
+  -- 后台订单列表：按时间倒序 + 可选状态筛选。这两个索引不能合并——
+  -- status 在最左列时无法支撑「不带 status」的排序需求
+  KEY `idx_status_create` (`status`, `create_time`),
+  KEY `idx_create_time` (`create_time`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '订单表';
 
 -- ----------------------------
