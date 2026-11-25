@@ -7,6 +7,8 @@ import com.deng.recommend.entity.Category;
 import com.deng.recommend.entity.Product;
 import com.deng.recommend.service.AdminService;
 import com.deng.recommend.service.BehaviorService;
+import com.deng.recommend.service.RecommendExposureService;
+import com.deng.recommend.vo.RecommendCtrVO;
 import com.deng.recommend.vo.CarouselVO;
 import com.deng.recommend.vo.OrderVO;
 import com.deng.recommend.vo.ProductVO;
@@ -37,6 +39,7 @@ public class AdminController {
 
     private final AdminService adminService;
     private final BehaviorService behaviorService;
+    private final RecommendExposureService recommendExposureService;
 
     /**
      * 手动刷新推荐模型缓存。
@@ -176,5 +179,16 @@ public class AdminController {
     public Result<Void> updateCarouselStatus(@PathVariable Long id, @RequestParam Integer status) {
         adminService.updateCarouselStatus(id, status);
         return Result.success();
+    }
+
+    /**
+     * 推荐点击率：曝光后是否被点开。
+     *
+     * <p>与离线 Precision 互补——离线看「推得准不准」，
+     * 这里看「推了有没有被真的看见」。
+     */
+    @GetMapping("/recommend/ctr")
+    public Result<RecommendCtrVO> recommendCtr(@RequestParam(defaultValue = "7") int days) {
+        return Result.success(recommendExposureService.ctr(days));
     }
 }

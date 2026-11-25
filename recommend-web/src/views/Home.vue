@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { getCarousels, getCategories, getRecommendFeed, reportBehavior } from '../api'
+import { getCarousels, getCategories, getRecommendFeed, reportBehavior, reportExposure } from '../api'
 import { useUserStore } from '../stores/user'
 import { useFavoriteStore } from '../stores/favorite'
 import ProductCard from '../components/ProductCard.vue'
@@ -133,6 +133,12 @@ async function loadNextPage() {
     // 本页全是重复数据时停止，避免无限触发
     if (fresh.length === 0) {
       hasMore.value = false
+    }
+
+    // 曝光回流：静默上报本页展示的商品。失败不提示也不重试——
+    // 统计缺失可以接受，打断用户浏览不行。
+    if (userStore.isLoggedIn && fresh.length > 0) {
+      reportExposure('HOME_FEED', fresh.map((item) => item.id)).catch(() => {})
     }
   } catch {
     hasMore.value = false

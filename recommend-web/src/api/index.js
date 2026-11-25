@@ -56,6 +56,18 @@ export const evaluateRecommend = (topN = 10) =>
 export const getRecommendFeed = (cursor = null, pageSize = 10) =>
   http.get('/recommend/feed', { params: { cursor: cursor || undefined, pageSize } })
 
+/**
+ * 上报一次推荐曝光。
+ *
+ * 调用方不需要 await：曝光统计是观测手段，失败不应影响列表展示。
+ */
+export const reportExposure = (scene, productIds) =>
+  http.post('/recommend/exposure', { scene, productIds })
+
+/** 推荐点击率（后台）：曝光数与曝光后被点击的比例 */
+export const getRecommendCtr = (days = 7) =>
+  http.get('/admin/recommend/ctr', { params: { days } })
+
 /* ===== 轮播图 ===== */
 export const getCarousels = () => http.get('/carousels')
 

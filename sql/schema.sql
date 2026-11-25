@@ -309,3 +309,21 @@ CREATE TABLE `revoked_token` (
   UNIQUE KEY `uk_token_hash` (`token_hash`),
   KEY `idx_expire_at` (`expire_at`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '已注销令牌黑名单';
+
+-- ----------------------------
+-- 15. 推荐曝光流水
+--     与 behavior(CLICK) 关联可算真实点击率；离线指标只说明「推得准不准」
+-- ----------------------------
+DROP TABLE IF EXISTS `recommend_exposure`;
+CREATE TABLE `recommend_exposure` (
+  `id`         BIGINT      NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `user_id`    BIGINT      NOT NULL                COMMENT '被推荐用户',
+  `product_id` BIGINT      NOT NULL                COMMENT '曝光的商品',
+  `scene`      VARCHAR(32) NOT NULL                COMMENT '场景：HOME_FEED / SIMILAR / HOT',
+  `position`   INT         DEFAULT NULL            COMMENT '在该场景中的位次，从 1 开始',
+  `exposed_at` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '曝光时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_time` (`exposed_at`),
+  KEY `idx_user_time` (`user_id`, `exposed_at`),
+  KEY `idx_user_product` (`user_id`, `product_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '推荐曝光流水';

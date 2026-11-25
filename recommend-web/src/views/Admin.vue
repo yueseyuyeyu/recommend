@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   adminConfirmReceipt,
+  getRecommendCtr,
   createCarousel,
   createProduct,
   deleteCarousel,
@@ -56,10 +57,22 @@ async function loadStats() {
   }
 }
 
+/* ---------- 推荐点击率（曝光回流） ---------- */
+const ctr = ref(null)
+
+async function loadCtr() {
+  try {
+    ctr.value = await getRecommendCtr(7)
+  } catch {
+    ctr.value = null
+  }
+}
+
 async function handleEvaluate() {
   evaluating.value = true
   try {
     evaluation.value = await evaluateRecommend(10)
+    await loadCtr()
   } catch {
     evaluation.value = null
   } finally {
@@ -777,6 +790,7 @@ watch(activeTab, (tab) => {
 
 onMounted(() => {
   loadStats()
+  loadCtr()
   loadCategories()
   loadProducts()
 })
@@ -865,6 +879,15 @@ onMounted(() => {
               <span>{{ percent(evaluation.randomBaseline?.recall) }}</span>
             </div>
             <div class="baseline-hint">{{ baselineHint }}</div>
+          </div>
+
+          <div v-if="ctr" class="ctr-line">
+            近 {{ ctr.days }} 天：曝光 <b>{{ ctr.exposures }}</b> 次，其中被点击
+            <b>{{ ctr.clicked }}</b> 次，点击率
+            <b>{{ (ctr.ctr * 100).toFixed(2) }}%</b>
+            <span class="ctr-hint">
+              （离线指标看「推得准不准」，这里看「推了有没有被真的点开」）
+            </span>
           </div>
 
           <el-empty v-if="!evaluation" description="点击「运行评测」查看推荐算法指标" />
@@ -1513,6 +1536,25 @@ onMounted(() => {
   font-size: 14px;
   color: #c0c4cc;
   cursor: not-allowed;
+}
+
+/* ---------- 点击率 ---------- */
+.ctr-line {
+  margin-top: 12px;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: #606266;
+  background: #f7f9fc;
+  border-radius: 6px;
+}
+
+.ctr-line b {
+  color: #303133;
+}
+
+.ctr-hint {
+  color: #909399;
 }
 
 /* ---------- 基线对比 ---------- */

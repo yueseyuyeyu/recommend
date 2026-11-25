@@ -3,13 +3,18 @@ package com.deng.recommend.controller;
 import com.deng.recommend.common.Result;
 import com.deng.recommend.config.SecurityUtils;
 import com.deng.recommend.recommend.evaluator.RecommendEvaluator;
+import com.deng.recommend.dto.ExposureReportRequest;
+import com.deng.recommend.service.RecommendExposureService;
 import com.deng.recommend.service.RecommendService;
 import com.deng.recommend.vo.FeedPageVO;
 import com.deng.recommend.vo.RecommendVO;
 import lombok.RequiredArgsConstructor;
+import jakarta.validation.Valid;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -29,6 +34,7 @@ import java.util.List;
 public class RecommendController {
 
     private final RecommendService recommendService;
+    private final RecommendExposureService recommendExposureService;
 
     /**
      * 首页个性化推荐，基于 UserCF，不足时以热门商品补足。
@@ -110,5 +116,17 @@ public class RecommendController {
     @GetMapping("/evaluate")
     public Result<RecommendEvaluator.EvaluationResult> evaluate(@RequestParam(defaultValue = "10") int topN) {
         return Result.success(recommendService.evaluate(topN));
+    }
+
+    /**
+     * 上报一次推荐曝光。
+     *
+     * <p>前端在推荐列表渲染完成后静默调用；失败不影响展示，
+     * 因此返回值只报告写入条数，不承载业务含义。
+     */
+    @PostMapping("/exposure")
+    public Result<Integer> reportExposure(@Valid @RequestBody ExposureReportRequest request) {
+        return Result.success(
+                recommendExposureService.report(SecurityUtils.currentUserId(), request));
     }
 }
