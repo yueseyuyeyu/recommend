@@ -99,4 +99,52 @@ class RecommendEvaluatorTest {
         assertThat(result.getRecommendedItemCount()).isEqualTo(2);
         assertThat(result.getCoverage()).isCloseTo(2.0 / 3.0, within(1e-9));
     }
+
+    @Test
+    void evaluateWithBaselines_fillsBaselinesAndComputesLift() {
+        // 用户 1 在训练集看过 10、11；冷门商品 20/30/40 来自用户 2
+        List<BehaviorRecord> train = new ArrayList<>();
+        train.add(record(1L, 10L, 10.0));
+        train.add(record(1L, 11L, 9.0));
+        train.add(record(2L, 20L, 8.0));
+        train.add(record(2L, 30L, 7.0));
+        train.add(record(2L, 40L, 6.0));
+        // 测试集里用户 1 真正感兴趣的是 20 与 40
+        List<BehaviorRecord> test = List.of(record(1L, 20L, 1.0), record(1L, 40L, 1.0));
+
+        EvaluationResult result = RecommendEvaluator.evaluateWithBaselines(
+                train, test,
+                (userId, topN) -> List.of(new ScoredItem(20L, 1.0), new ScoredItem(40L, 1.0)),
+                2);
+
+        assertThat(result.getPopularityBaseline()).isNotNull();
+        assertThat(result.getRandomBaseline()).isNotNull();
+        assertThat(result.getPrecision()).isCloseTo(1.0, within(1e-9));
+
+        // 热门基线会推 20 与 30：20 命中、30 不命中，准确率 0.5
+        assertThat(result.getPopularityBaseline().getPrecision()).isCloseTo(0.5, within(1e-9));
+        // 相对提升 = (1.0 - 0.5) / 0.5 = 100%
+        assertThat(result.getPrecisionLiftVsPopularity()).isCloseTo(1.0, within(1e-9));
+    }
+
+    @Test
+    void evaluateWithBaselines_baselinesSkipItemsUserAlreadyTouched() {
+        // 用户 1 训练集看过 10，测试集又出现 10。
+        // 若基线不过滤已交互物品，就会推 10 并命中，准确率变成 1.0；
+        // 正确实现应跳过 10，改推 20，因此准确率为 0。
+        List<BehaviorRecord> train = new ArrayList<>();
+        train.add(record(1L, 10L, 10.0));
+        train.add(record(2L, 20L, 8.0));
+        List<BehaviorRecord> test = List.of(record(1L, 10L, 1.0));
+
+        EvaluationResult result = RecommendEvaluator.evaluateWithBaselines(
+                train, test, (userId, topN) -> List.of(), 1);
+
+        assertThat(result.getPopularityBaseline().getPrecision()).isZero();
+        assertThat(result.getRandomBaseline().getPrecision()).isZero();
+        // 基线为 0 时相对提升无意义，应为 null 而不是 0（否则会被读成「毫无提升」）
+        assertThat(result.getPrecisionLiftVsPopularity()).isNull();
+        // 绝对差值仍然可读
+        assertThat(result.getPrecisionDeltaVsPopularity()).isZero();
+    }
 }

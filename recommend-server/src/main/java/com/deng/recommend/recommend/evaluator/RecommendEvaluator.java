@@ -29,6 +29,9 @@ import java.util.stream.Collectors;
  */
 public final class RecommendEvaluator {
 
+    /** 随机基线的固定种子：保证同一份数据每次评测结果一致，可对比 */
+    private static final long RANDOM_SEED = 20261125L;
+
     private RecommendEvaluator() {
     }
 
@@ -53,8 +56,116 @@ public final class RecommendEvaluator {
                                             List<BehaviorRecord> testRecords,
                                             Recommender recommender,
                                             int topN) {
-        UserItemMatrix trainMatrix = UserItemMatrix.build(trainRecords);
+        return evaluateInternal(UserItemMatrix.build(trainRecords), testRecords, recommender, topN);
+    }
 
+    /**
+     * 执行评测，并与「纯热门」「随机」两条基线对比。
+     *
+     * <p>只有主结果时无法判断算法好坏——2% 的准确率到底是优秀还是不及格？
+     * 有了基线才知道：推荐算法至少要比「谁热推谁」强，否则等于没做个性化。
+     *
+     * @param trainRecords 训练集行为
+     * @param testRecords  测试集行为
+     * @param recommender  待评测的推荐器
+     * @param topN         每个用户推荐的物品数量
+     * @return 主结果，同时携带两条基线与相对提升
+     */
+    public static EvaluationResult evaluateWithBaselines(List<BehaviorRecord> trainRecords,
+                                                        List<BehaviorRecord> testRecords,
+                                                        Recommender recommender,
+                                                        int topN) {
+        UserItemMatrix trainMatrix = UserItemMatrix.build(trainRecords);
+        EvaluationResult main = evaluateInternal(trainMatrix, testRecords, recommender, topN);
+
+        List<Long> ranked = popularityRanked(trainMatrix);
+        EvaluationResult popularity = evaluateInternal(trainMatrix, testRecords,
+                (userId, n) -> popularityTopN(ranked, trainMatrix, userId, n), topN);
+        EvaluationResult random = evaluateInternal(trainMatrix, testRecords,
+                randomRecommender(trainMatrix, RANDOM_SEED), topN);
+
+        main.setPopularityBaseline(popularity);
+        main.setRandomBaseline(random);
+        main.setPrecisionDeltaVsPopularity(main.getPrecision() - popularity.getPrecision());
+        main.setRecallDeltaVsPopularity(main.getRecall() - popularity.getRecall());
+        main.setPrecisionLiftVsPopularity(relativeLift(main.getPrecision(), popularity.getPrecision()));
+        main.setRecallLiftVsPopularity(relativeLift(main.getRecall(), popularity.getRecall()));
+        return main;
+    }
+
+    /**
+     * 相对提升：(本算法 - 基线) / 基线。
+     *
+     * <p>基线为 0 时返回 {@code null} 而不是 0——「基线为 0」意味着相对提升无穷大，
+     * 显示成 0% 会被读反成「算法毫无提升」。此时看绝对差值更有意义。
+     */
+    private static Double relativeLift(double actual, double baseline) {
+        if (baseline <= 0.0) {
+            return null;
+        }
+        return (actual - baseline) / baseline;
+    }
+
+    /** 按训练集热度降序排列的物品，热门基线只算一次 */
+    private static List<Long> popularityRanked(UserItemMatrix matrix) {
+        return matrix.allItemIds().stream()
+                .sorted((a, b) -> Double.compare(matrix.getPopularity(b), matrix.getPopularity(a)))
+                .collect(Collectors.toList());
+    }
+
+    /** 热门基线：取热度最高的 N 个，跳过用户已在训练集交互过的物品 */
+    private static List<ScoredItem> popularityTopN(List<Long> ranked,
+                                                   UserItemMatrix matrix,
+                                                   Long userId,
+                                                   int topN) {
+        List<ScoredItem> result = new ArrayList<>(topN);
+        for (Long itemId : ranked) {
+            if (result.size() >= topN) {
+                break;
+            }
+            if (matrix.hasInteraction(userId, itemId)) {
+                continue;
+            }
+            result.add(new ScoredItem(itemId, matrix.getPopularity(itemId), "热门基线"));
+        }
+        return result;
+    }
+
+    /**
+     * 随机基线：从全库随机抽 N 个，跳过用户已交互物品。
+     *
+     * <p>种子按用户派生，保证同一用户每次抽到同一批商品——
+     * 否则基线本身会抖动，没法作为对照。
+     */
+    private static Recommender randomRecommender(UserItemMatrix matrix, long seed) {
+        List<Long> allItems = matrix.allItemIds().stream().sorted().collect(Collectors.toList());
+        return (userId, topN) -> {
+            List<Long> candidates = new ArrayList<>(allItems.size());
+            for (Long itemId : allItems) {
+                if (!matrix.hasInteraction(userId, itemId)) {
+                    candidates.add(itemId);
+                }
+            }
+            java.util.Random random = new java.util.Random(seed ^ userId.hashCode());
+            java.util.Collections.shuffle(candidates, random);
+
+            List<ScoredItem> result = new ArrayList<>(Math.min(topN, candidates.size()));
+            for (int i = 0; i < topN && i < candidates.size(); i++) {
+                result.add(new ScoredItem(candidates.get(i), 0.0, "随机基线"));
+            }
+            return result;
+        };
+    }
+
+    /**
+     * 单次评测的公共实现：把一段时间切分好的训练矩阵、测试集与推荐器跑出指标。
+     *
+     * <p>主算法与两条基线共用本方法，保证口径一致——否则基线只是「看起来」可比。
+     */
+    private static EvaluationResult evaluateInternal(UserItemMatrix trainMatrix,
+                                                     List<BehaviorRecord> testRecords,
+                                                     Recommender recommender,
+                                                     int topN) {
         // 测试集中每个用户的真实正样本
         Map<Long, Set<Long>> testPositives = new HashMap<>();
         for (BehaviorRecord record : testRecords) {
@@ -190,6 +301,24 @@ public final class RecommendEvaluator {
 
         /** 推荐物品的平均流行度（自然对数） */
         private double avgPopularity;
+
+        /** 纯热门基线（同样排除用户已交互物品） */
+        private EvaluationResult popularityBaseline;
+
+        /** 随机基线（种子固定，可复现） */
+        private EvaluationResult randomBaseline;
+
+        /** 相对热门基线的 Precision 提升，0.15 表示高 15%；基线为 0 时为 null */
+        private Double precisionLiftVsPopularity;
+
+        /** 相对热门基线的 Recall 提升；基线为 0 时为 null */
+        private Double recallLiftVsPopularity;
+
+        /** 相对热门基线的 Precision 绝对差值（百分点，0.01 表示高 1 个百分点） */
+        private double precisionDeltaVsPopularity;
+
+        /** 相对热门基线的 Recall 绝对差值 */
+        private double recallDeltaVsPopularity;
 
         @Override
         public String toString() {

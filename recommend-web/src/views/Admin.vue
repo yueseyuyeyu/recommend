@@ -77,6 +77,18 @@ function percent(value) {
  * 每个指标都配三层信息：显示名、一句话白话解释、悬停时的计算口径。
  * 目的是让没接触过推荐系统的人也能看懂这张表，而不是只看一堆百分比。
  */
+/** 基线对比的一句话结论：区分「相对提升」与「基线为 0 只能看绝对差」 */
+const baselineHint = computed(() => {
+  const data = evaluation.value
+  if (!data || !data.popularityBaseline) return ''
+  const deltaPoints = ((data.precisionDeltaVsPopularity ?? 0) * 100).toFixed(2)
+  if (data.precisionLiftVsPopularity === null || data.precisionLiftVsPopularity === undefined) {
+    return `热门基线同样排除已看商品后命中为 0，相对提升无从计算；绝对差 ${deltaPoints} 个百分点。`
+  }
+  const liftPct = (data.precisionLiftVsPopularity * 100).toFixed(1)
+  return `Precision 比热门基线高 ${liftPct}%，绝对差 ${deltaPoints} 个百分点。`
+})
+
 const metricCards = computed(() => {
   const data = evaluation.value
   if (!data) return []
@@ -832,7 +844,30 @@ onMounted(() => {
               <strong>指标绝对值不代表线上效果</strong>，只有横向比较不同参数时才有参考意义。
             </div>
           </div>
-          <el-empty v-else description="点击「运行评测」查看推荐算法指标" />
+          <div v-if="evaluation && evaluation.popularityBaseline" class="baseline-block">
+            <div class="baseline-head">算法 vs 基线（同一测试集，同样排除用户已看过的商品）</div>
+            <div class="baseline-row baseline-row--head">
+              <span>方案</span><span>Precision</span><span>Recall</span>
+            </div>
+            <div class="baseline-row">
+              <span>混合推荐（本算法）</span>
+              <span>{{ percent(evaluation.precision) }}</span>
+              <span>{{ percent(evaluation.recall) }}</span>
+            </div>
+            <div class="baseline-row">
+              <span>纯热门</span>
+              <span>{{ percent(evaluation.popularityBaseline.precision) }}</span>
+              <span>{{ percent(evaluation.popularityBaseline.recall) }}</span>
+            </div>
+            <div class="baseline-row">
+              <span>随机</span>
+              <span>{{ percent(evaluation.randomBaseline?.precision) }}</span>
+              <span>{{ percent(evaluation.randomBaseline?.recall) }}</span>
+            </div>
+            <div class="baseline-hint">{{ baselineHint }}</div>
+          </div>
+
+          <el-empty v-if="!evaluation" description="点击「运行评测」查看推荐算法指标" />
         </el-card>
       </el-tab-pane>
 
@@ -1478,6 +1513,50 @@ onMounted(() => {
   font-size: 14px;
   color: #c0c4cc;
   cursor: not-allowed;
+}
+
+/* ---------- 基线对比 ---------- */
+.baseline-block {
+  margin-top: 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.baseline-head {
+  padding: 8px 12px;
+  font-size: 12.5px;
+  color: #606266;
+  background: #fafafa;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.baseline-row {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr 1fr;
+  padding: 7px 12px;
+  font-size: 13px;
+  color: #303133;
+  border-bottom: 1px solid #f5f7fa;
+}
+
+.baseline-row span:not(:first-child) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.baseline-row--head {
+  color: #909399;
+  font-size: 12px;
+  background: #fcfcfc;
+}
+
+.baseline-hint {
+  padding: 9px 12px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: #606266;
+  background: #fafafa;
 }
 
 .carousel-preview {

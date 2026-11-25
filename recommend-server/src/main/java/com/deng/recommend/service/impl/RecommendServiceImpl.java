@@ -315,9 +315,19 @@ public class RecommendServiceImpl implements RecommendService {
         List<BehaviorRecord> test = split[1];
         UserItemMatrix trainMatrix = UserItemMatrix.build(train);
 
-        RecommendEvaluator.EvaluationResult result = RecommendEvaluator.evaluate(
+        List<Long> offShelf = findOffShelfProductIds();
+
+        // 关键口径修正：排除「该用户在训练集中已交互过的商品」。
+        // 不做这一步的话，热门兜底会把用户自己看过的商品推回来，
+        // 而测试集里同一个商品很可能再次出现，于是被算成命中——
+        // 指标虚高的同时，推荐的其实是「已经知道的答案」。
+        RecommendEvaluator.EvaluationResult result = RecommendEvaluator.evaluateWithBaselines(
                 train, test,
-                (userId, n) -> recommendEngine.recommendForUser(trainMatrix, userId, n, null),
+                (userId, n) -> {
+                    List<Long> exclude = new ArrayList<>(trainMatrix.getUserItems(userId).keySet());
+                    exclude.addAll(offShelf);
+                    return recommendEngine.recommendForUser(trainMatrix, userId, n, exclude);
+                },
                 size);
 
         log.info("推荐算法离线评测结果: {}", result);
