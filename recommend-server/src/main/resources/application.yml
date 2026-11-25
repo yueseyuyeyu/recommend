@@ -105,6 +105,9 @@ management:
       show-details: when-authorized
 
 logging:
+  # 日志落盘目录（logback-spring.xml 读取该值）；容器化部署时挂载到宿主机
+  file:
+    path: ${LOG_DIR:logs}
   level:
     root: INFO
     com.deng.recommend: DEBUG
