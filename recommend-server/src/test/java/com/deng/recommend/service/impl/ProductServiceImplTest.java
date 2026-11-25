@@ -27,6 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -118,5 +120,43 @@ class ProductServiceImplTest {
 
         assertThat(vo.getId()).isEqualTo(7L);
         assertThat(vo.getCategoryName()).isEqualTo("手机数码-旗舰");
+    }
+
+    @Test
+    void page_withKeyword_usesFulltextAndSkipsWrapperQuery() {
+        when(productMapper.searchByKeyword(any(), any(), any(), any(), any()))
+                .thenReturn(pageWith(product(1)));
+        when(categoryMapper.selectList(any())).thenReturn(List.of());
+
+        ProductQuery query = new ProductQuery();
+        query.setKeyword("手机");
+        PageResult<ProductVO> result = productService.page(query, 1, 10);
+
+        assertThat(result.getRecords()).hasSize(1);
+        // 全文命中时不应再走 LIKE 的 selectPage
+        verify(productMapper, never()).selectPage(any(), any());
+    }
+
+    @Test
+    void page_withKeyword_noFulltextHit_fallsBackToLike() {
+        // 单字查询在 ngram(2) 下必然无命中，此时必须回退 LIKE，否则用户「搜不到」
+        when(productMapper.searchByKeyword(any(), any(), any(), any(), any()))
+                .thenReturn(pageWith());
+        when(productMapper.selectPage(any(), any())).thenReturn(pageWith(product(1)));
+        when(categoryMapper.selectList(any())).thenReturn(List.of());
+
+        ProductQuery query = new ProductQuery();
+        query.setKeyword("机");
+        PageResult<ProductVO> result = productService.page(query, 1, 10);
+
+        assertThat(result.getRecords()).hasSize(1);
+        verify(productMapper).selectPage(any(), any());
+    }
+
+    private static Page<Product> pageWith(Product... products) {
+        Page<Product> page = new Page<>(1, 10);
+        page.setRecords(List.of(products));
+        page.setTotal(products.length);
+        return page;
     }
 }

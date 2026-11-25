@@ -86,7 +86,10 @@ CREATE TABLE `product` (
   PRIMARY KEY (`id`),
   KEY `idx_category_id` (`category_id`),
   KEY `idx_status_sales` (`status`, `sales`),
-  KEY `idx_name` (`name`)
+  KEY `idx_name` (`name`),
+  -- 中文全文检索：ngram 按 2 字切分，「手机」这类词可命中；
+  -- 单字查询匹配不到，由服务层回退 LIKE 兜底
+  FULLTEXT KEY `ft_product_name` (`name`, `subtitle`) WITH PARSER ngram
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '商品表';
 
 -- ----------------------------

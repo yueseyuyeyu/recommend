@@ -56,20 +56,39 @@ public class ProductServiceImpl implements ProductService {
                 ? null
                 : categoryService.selfAndDescendantIds(query.getCategoryId());
 
+        String keyword = query.getKeyword() == null ? null : query.getKeyword().trim();
+
+        // 有关键词时走 ngram 全文索引，按相关度排序；
+        // 原实现用 LIKE '%kw%'，前导通配符让 idx_name 失效，商品上万即全表扫
+        if (StringUtils.hasText(keyword)) {
+            IPage<Product> fulltextPage = productMapper.searchByKeyword(
+                    new Page<>(pageNum, pageSize), keyword, categoryIds,
+                    query.getMinPrice(), query.getMaxPrice());
+            if (fulltextPage.getTotal() > 0) {
+                return toPageResult(fulltextPage);
+            }
+            // ngram 最小切分长度为 2：搜单个汉字匹配不到，回退 LIKE 保证「搜得到」
+            log.debug("全文检索无命中，回退 LIKE: {}", keyword);
+        }
+
         LambdaQueryWrapper<Product> wrapper = new LambdaQueryWrapper<Product>()
                 // 前台只展示上架商品
                 .eq(Product::getStatus, 1)
-                .like(StringUtils.hasText(query.getKeyword()), Product::getName, query.getKeyword())
+                .like(StringUtils.hasText(keyword), Product::getName, keyword)
                 .in(categoryIds != null && !categoryIds.isEmpty(), Product::getCategoryId, categoryIds)
                 .ge(query.getMinPrice() != null, Product::getPrice, query.getMinPrice())
                 .le(query.getMaxPrice() != null, Product::getPrice, query.getMaxPrice());
 
         applySort(wrapper, query.getSort());
 
-        IPage<Product> page = productMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
-        PageResult<Product> pageResult = PageResult.of(page);
+        return toPageResult(productMapper.selectPage(new Page<>(pageNum, pageSize), wrapper));
+    }
 
-        // 实体转 VO 后重建分页对象，保留原分页元信息
+    /**
+     * 实体分页转视图分页，保留原分页元信息。
+     */
+    private PageResult<ProductVO> toPageResult(IPage<Product> page) {
+        PageResult<Product> pageResult = PageResult.of(page);
         Map<Long, String> categoryNames = loadCategoryNames();
         List<ProductVO> records = pageResult.getRecords().stream()
                 .map(product -> toVO(product, categoryNames))
