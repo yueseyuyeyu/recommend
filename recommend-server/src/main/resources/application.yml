@@ -70,6 +70,9 @@ security:
     block-seconds: ${LOGIN_BLOCK_SECONDS:600}
 
 app:
+  # 跨域白名单（逗号分隔）。开发期走 Vite 代理即可同源，这里是为直连 8080 调试准备
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
   # 用户上传文件（头像）的落盘目录。
   # 相对路径是相对「进程工作目录」解析的：
   #   IDEA 直接运行 → 项目根目录/uploads
