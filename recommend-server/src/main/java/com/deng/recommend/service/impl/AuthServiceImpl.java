@@ -10,6 +10,7 @@ import com.deng.recommend.entity.enums.UserRole;
 import com.deng.recommend.mapper.UserMapper;
 import com.deng.recommend.security.JwtTokenProvider;
 import com.deng.recommend.service.AuthService;
+import com.deng.recommend.service.LoginAttemptService;
 import com.deng.recommend.vo.UserVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -37,6 +38,7 @@ public class AuthServiceImpl implements AuthService {
     private final UserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
+    private final LoginAttemptService loginAttemptService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -65,17 +67,30 @@ public class AuthServiceImpl implements AuthService {
     }
 
     @Override
-    public UserVO login(LoginRequest request) {
+    public UserVO login(LoginRequest request, String clientIp) {
+        String ip = clientIp == null ? "-" : clientIp;
+
+        // 先看是否在锁定期内：被锁时连密码比对都不做，直接拒绝
+        if (loginAttemptService.isBlocked(request.getUsername(), ip)) {
+            long seconds = loginAttemptService.remainingBlockSeconds(request.getUsername(), ip);
+            throw new BusinessException(ResultCode.LOGIN_TOO_MANY_ATTEMPTS,
+                    "登录失败次数过多，请 " + seconds + " 秒后再试");
+        }
+
         User user = userMapper.selectOne(new LambdaQueryWrapper<User>()
                 .eq(User::getUsername, request.getUsername()));
 
         // 用户不存在与密码错误返回同一提示，避免泄露账号是否存在
         if (user == null || !passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+            loginAttemptService.recordFailure(request.getUsername(), ip);
             throw new BusinessException(ResultCode.USERNAME_OR_PASSWORD_ERROR);
         }
         if (!Integer.valueOf(1).equals(user.getStatus())) {
+            // 账号状态问题不计入失败：否则用户会因为账号被禁用而被误锁
             throw new BusinessException(ResultCode.USER_DISABLED);
         }
+
+        loginAttemptService.recordSuccess(request.getUsername(), ip);
 
         // 更新最后登录时间
         User update = new User();

@@ -23,5 +23,5 @@ public interface AuthService {
      * @param request 登录请求
      * @return 登录成功的用户视图（含令牌）
      */
-    UserVO login(LoginRequest request);
+    UserVO login(LoginRequest request, String clientIp);
 }

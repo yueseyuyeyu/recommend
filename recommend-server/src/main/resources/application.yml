@@ -63,6 +63,11 @@ security:
   # 用户状态（是否禁用/删除）本地缓存时长：管理员禁用后旧令牌的失效延迟上界（默认 1 秒）。
   # 设为 0 每次查库；设为负数关闭该校验
   user-status-cache-ttl-ms: ${USER_STATUS_CACHE_TTL_MS:1000}
+  login:
+    # 登录失败限流：窗口内累计到 max-attempts 次即锁定 block-seconds 秒
+    max-attempts: ${LOGIN_MAX_ATTEMPTS:5}
+    window-seconds: ${LOGIN_WINDOW_SECONDS:600}
+    block-seconds: ${LOGIN_BLOCK_SECONDS:600}
 
 app:
   # 用户上传文件（头像）的落盘目录。

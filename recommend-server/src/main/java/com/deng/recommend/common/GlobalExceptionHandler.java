@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.NoHandlerFoundException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+
 
 import java.util.stream.Collectors;
 
@@ -74,6 +76,20 @@ public class GlobalExceptionHandler {
     public Result<Void> handleMissingParameter(MissingServletRequestParameterException e) {
         log.warn("缺少请求参数: {}", e.getParameterName());
         return Result.fail(ResultCode.PARAM_ERROR.getCode(), "缺少必填参数: " + e.getParameterName());
+    }
+
+    /**
+     * 请求参数类型不匹配，例如 {@code ?pageNum=abc}。
+     *
+     * <p>不单独处理会落到兜底分支报成 9999「系统内部错误」——
+     * 这明明是调用方传错了参数，却让排查方向指向服务端。
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    @ResponseStatus(HttpStatus.OK)
+    public Result<Void> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
+        log.warn("参数类型不匹配: {}={}", e.getName(), e.getValue());
+        return Result.fail(ResultCode.PARAM_ERROR.getCode(),
+                "参数 " + e.getName() + " 格式不正确");
     }
 
     /**

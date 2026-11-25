@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
@@ -57,10 +58,28 @@ public class FileStorageServiceImpl implements FileStorageService {
             throw new BusinessException(ResultCode.PARAM_ERROR, "图片不能超过 2MB");
         }
 
+        // 一次性读进内存：上限 2MB，比「先流式写盘再回读校验」简单且不会留脏文件
+        byte[] content;
+        try {
+            content = file.getBytes();
+        } catch (IOException e) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "读取上传文件失败，请重试");
+        }
+
         String extension = resolveExtension(file.getOriginalFilename());
         if (!ALLOWED_EXTENSIONS.contains(extension)) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "仅支持 jpg / png / gif / webp 格式");
         }
+
+        // 扩展名可以随便改，必须再看文件头。
+        // 否则把一个 HTML/脚本改名成 .png 就能存进可访问的目录，
+        // 配合浏览器的内容嗅探会变成存储型 XSS 的入口。
+        String detected = detectImageType(content);
+        if (detected == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "文件内容不是有效的图片");
+        }
+        // 以实际类型为准命名，避免「.png 里装着 jpeg」这类不一致
+        extension = detected;
 
         String filename = userId + "_" + UUID.randomUUID().toString().replace("-", "") + "." + extension;
 
@@ -71,15 +90,39 @@ public class FileStorageServiceImpl implements FileStorageService {
             if (!target.startsWith(avatarDir)) {
                 throw new BusinessException(ResultCode.PARAM_ERROR, "非法的文件名");
             }
-            try (var in = file.getInputStream()) {
-                Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
-            }
+            Files.write(target, content, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
         } catch (IOException e) {
             log.error("头像保存失败: userId={}, filename={}", userId, filename, e);
             throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "图片保存失败，请稍后重试");
         }
 
         return "/uploads/avatar/" + filename;
+    }
+
+    /**
+     * 按文件头识别真实图片类型，认不出返回 null。
+     *
+     * <p>只认四种：JPEG(FF D8 FF)、PNG(89 50 4E 47)、GIF(47 49 46 38)、
+     * WEBP(RIFF....WEBP)。这几条魔数足够挡住「改名成图片的其它文件」。
+     */
+    private String detectImageType(byte[] content) {
+        if (content == null || content.length < 12) {
+            return null;
+        }
+        if ((content[0] & 0xFF) == 0xFF && (content[1] & 0xFF) == 0xD8 && (content[2] & 0xFF) == 0xFF) {
+            return "jpg";
+        }
+        if ((content[0] & 0xFF) == 0x89 && content[1] == 'P' && content[2] == 'N' && content[3] == 'G') {
+            return "png";
+        }
+        if (content[0] == 'G' && content[1] == 'I' && content[2] == 'F' && content[3] == '8') {
+            return "gif";
+        }
+        if (content[0] == 'R' && content[1] == 'I' && content[2] == 'F' && content[3] == 'F'
+                && content[8] == 'W' && content[9] == 'E' && content[10] == 'B' && content[11] == 'P') {
+            return "webp";
+        }
+        return null;
     }
 
     /**

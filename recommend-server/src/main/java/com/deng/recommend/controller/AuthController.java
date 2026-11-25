@@ -6,6 +6,7 @@ import com.deng.recommend.dto.RegisterRequest;
 import com.deng.recommend.service.AuthService;
 import com.deng.recommend.service.TokenBlacklistService;
 import com.deng.recommend.vo.UserVO;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
@@ -49,8 +50,23 @@ public class AuthController {
      * @return 登录成功的用户视图（含令牌）
      */
     @PostMapping("/login")
-    public Result<UserVO> login(@Valid @RequestBody LoginRequest request) {
-        return Result.success(authService.login(request));
+    public Result<UserVO> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
+        return Result.success(authService.login(request, resolveClientIp(httpRequest)));
+    }
+
+    /**
+     * 取客户端 IP 用于登录限流。
+     *
+     * <p>优先信任反向代理写入的 {@code X-Forwarded-For} 首段；该头可被伪造，
+     * 但限流本身只是「提高爆破成本」，伪造它最多让攻击者绕过自己的锁定，
+     * 无法借此获得任何权限。
+     */
+    private String resolveClientIp(HttpServletRequest request) {
+        String forwarded = request.getHeader("X-Forwarded-For");
+        if (StringUtils.hasText(forwarded)) {
+            return forwarded.split(",")[0].trim();
+        }
+        return request.getRemoteAddr();
     }
 
     /**

@@ -24,6 +24,7 @@ public enum ResultCode {
     USER_DISABLED(2003, "账号已被禁用"),
     PASSWORD_MISMATCH(2004, "两次输入的密码不一致"),
     OLD_PASSWORD_ERROR(2005, "原密码错误"),
+    LOGIN_TOO_MANY_ATTEMPTS(2006, "登录失败次数过多，请稍后再试"),
 
     /* ===== 商品与类目 3000-3999 ===== */
     PRODUCT_NOT_FOUND(3001, "商品不存在"),
