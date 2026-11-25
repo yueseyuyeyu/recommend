@@ -4,6 +4,7 @@ import com.deng.recommend.common.PageResult;
 import com.deng.recommend.common.Result;
 import com.deng.recommend.entity.Carousel;
 import com.deng.recommend.entity.Category;
+import com.deng.recommend.dto.ProductStatusBatchRequest;
 import com.deng.recommend.entity.Product;
 import com.deng.recommend.service.AdminService;
 import com.deng.recommend.service.BehaviorService;
@@ -13,7 +14,10 @@ import com.deng.recommend.vo.CarouselVO;
 import com.deng.recommend.vo.OrderVO;
 import com.deng.recommend.vo.ProductVO;
 import com.deng.recommend.vo.UserVO;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,6 +29,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 
@@ -190,5 +197,35 @@ public class AdminController {
     @GetMapping("/recommend/ctr")
     public Result<RecommendCtrVO> recommendCtr(@RequestParam(defaultValue = "7") int days) {
         return Result.success(recommendExposureService.ctr(days));
+    }
+
+    /**
+     * 批量上下架商品。
+     *
+     * <p>返回实际影响条数：请求里含已删除的 id 时，affected 会小于请求数量，
+     * 前端据此提示「部分商品已不存在」。
+     */
+    @PutMapping("/products/batch-status")
+    public Result<Integer> updateProductStatusBatch(
+            @Valid @RequestBody ProductStatusBatchRequest request) {
+        return Result.success(
+                adminService.updateProductStatusBatch(request.getIds(), request.getStatus()));
+    }
+
+    /**
+     * 导出订单 CSV。
+     *
+     * <p>直接写响应流而不是先拼成字符串：订单量大时，
+     * 在内存里攒一整份 CSV 再返回，等于把数据库的压力换成堆的压力。
+     */
+    @GetMapping("/orders/export")
+    public void exportOrders(@RequestParam(required = false) Integer status,
+                             HttpServletResponse response) throws IOException {
+        String filename = "orders_"
+                + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmm")) + ".csv";
+        response.setContentType("text/csv;charset=UTF-8");
+        response.setHeader(HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename=\"" + filename + "\"");
+        adminService.exportOrders(status, response.getOutputStream());
     }
 }

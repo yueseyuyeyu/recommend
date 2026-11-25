@@ -64,6 +64,19 @@ export const getRecommendFeed = (cursor = null, pageSize = 10) =>
 export const reportExposure = (scene, productIds) =>
   http.post('/recommend/exposure', { scene, productIds })
 
+/** 管理员：批量上下架商品，返回实际影响条数 */
+export const updateProductStatusBatch = (ids, status) =>
+  http.put('/admin/products/batch-status', { ids, status })
+
+/**
+ * 管理员：导出订单 CSV。
+ *
+ * responseType=blob 让响应保持二进制；拦截器识别不到业务响应体，
+ * 会把原始 Blob 原样返回。
+ */
+export const exportOrdersCsv = (status) =>
+  http.get('/admin/orders/export', { params: { status }, responseType: 'blob' })
+
 /** 推荐点击率（后台）：曝光数与曝光后被点击的比例 */
 export const getRecommendCtr = (days = 7) =>
   http.get('/admin/recommend/ctr', { params: { days } })

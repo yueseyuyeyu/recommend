@@ -42,6 +42,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -62,6 +67,16 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class AdminServiceImpl implements AdminService {
+
+    /** 批量上下架单次上限，与 DTO 校验保持一致 */
+    private static final int MAX_BATCH_SIZE = 200;
+
+    /** 导出时每条 SQL 取多少行：兼顾往返次数与内存占用 */
+    private static final int EXPORT_BATCH_SIZE = 500;
+
+    /** CSV 里的时间格式：用空格分隔而非 ISO 的 T，Excel 才能直接识别为时间 */
+    private static final java.time.format.DateTimeFormatter CSV_TIME_FORMAT =
+            java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final ProductMapper productMapper;
     private final CategoryMapper categoryMapper;
@@ -121,6 +136,103 @@ public class AdminServiceImpl implements AdminService {
         if (affected == 0) {
             throw new BusinessException(ResultCode.PRODUCT_NOT_FOUND);
         }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int updateProductStatusBatch(List<Long> ids, Integer status) {
+        if (!Integer.valueOf(0).equals(status) && !Integer.valueOf(1).equals(status)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "状态只能为 0（下架）或 1（上架）");
+        }
+        if (ids == null || ids.isEmpty()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "请选择要操作的商品");
+        }
+        if (ids.size() > MAX_BATCH_SIZE) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "单次最多操作 " + MAX_BATCH_SIZE + " 个商品");
+        }
+
+        // 一条 UPDATE 完成，避免逐个调用产生 N 次往返
+        int affected = productMapper.update(null, new LambdaUpdateWrapper<Product>()
+                .in(Product::getId, ids)
+                .set(Product::getStatus, status));
+
+        log.info("批量修改商品状态, status={}, 请求={} 个, 实际影响={}", status, ids.size(), affected);
+        return affected;
+    }
+
+    @Override
+    public int exportOrders(Integer status, OutputStream out) {
+        int total = 0;
+        long lastId = 0L;
+
+        try {
+            // UTF-8 BOM：不加的话 Excel 打开中文列名会乱码
+            out.write(new byte[]{(byte) 0xEF, (byte) 0xBB, (byte) 0xBF});
+            Writer writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
+            writer.write("订单号,状态,金额,支付方式,下单时间,支付时间,配送方,物流单号,收货人,电话,收货地址\n");
+
+            // 游标分批：按主键递增翻页，边查边写。
+            // 用 id > lastId 而不是 OFFSET，深翻页时不会越翻越慢，
+            // 也不会因为并发插入导致同一条订单重复导出。
+            while (true) {
+                List<Order> batch = orderMapper.selectList(new LambdaQueryWrapper<Order>()
+                        .gt(Order::getId, lastId)
+                        .eq(status != null, Order::getStatus, status)
+                        .orderByAsc(Order::getId)
+                        .last("LIMIT " + EXPORT_BATCH_SIZE));
+
+                if (batch.isEmpty()) {
+                    break;
+                }
+                for (Order order : batch) {
+                    writer.write(toCsvRow(order));
+                    lastId = order.getId();
+                }
+                total += batch.size();
+                // 及时 flush，让浏览器开始收数据，而不是等全部查完才吐
+                writer.flush();
+            }
+            writer.flush();
+        } catch (IOException e) {
+            log.error("导出订单 CSV 失败，已写出 {} 行", total, e);
+            throw new BusinessException(ResultCode.SYSTEM_ERROR.getCode(), "导出失败，请稍后重试");
+        }
+
+        log.info("订单导出完成, status={}, 行数={}", status, total);
+        return total;
+    }
+
+    /** 拼一行 CSV，含逗号/引号/换行的字段加引号并转义 */
+    private String toCsvRow(Order order) {
+        OrderStatus status = order.getStatusEnum();
+        return String.join(",",
+                csv(order.getOrderNo()),
+                csv(status == null ? "" : status.getName()),
+                csv(order.getTotalAmount()),
+                csv(PayType.nameOf(order.getPayType())),
+                csv(formatTime(order.getCreateTime())),
+                csv(formatTime(order.getPaidTime())),
+                csv(Carrier.nameOf(order.getCarrier())),
+                csv(order.getTrackingNo()),
+                csv(order.getReceiverName()),
+                csv(order.getReceiverPhone()),
+                csv(order.getReceiverAddr())) + "\n";
+    }
+
+    private String formatTime(java.time.LocalDateTime time) {
+        return time == null ? "" : time.format(CSV_TIME_FORMAT);
+    }
+
+    private String csv(Object value) {
+        if (value == null) {
+            return "";
+        }
+        String text = String.valueOf(value);
+        if (text.contains(",") || text.contains("\"") || text.contains("\n") || text.contains("\r")) {
+            return "\"" + text.replace("\"", "\"\"") + "\"";
+        }
+        return text;
     }
 
     @Override

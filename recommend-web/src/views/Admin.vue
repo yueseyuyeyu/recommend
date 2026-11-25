@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   adminConfirmReceipt,
+  exportOrdersCsv,
   getRecommendCtr,
   createCarousel,
   createProduct,
@@ -22,6 +23,7 @@ import {
   updateCarouselStatus,
   updateOrderStatus,
   updateProduct,
+  updateProductStatusBatch,
   updateProductStatus,
   updateUserStatus
 } from '../api'
@@ -54,6 +56,63 @@ async function loadStats() {
     stats.value = (await getStatistics()) || {}
   } catch {
     stats.value = {}
+  }
+}
+
+/* ---------- 商品批量上下架 ---------- */
+const selectedProductIds = ref([])
+
+function handleProductSelection(rows) {
+  selectedProductIds.value = (rows || []).map((row) => row.id)
+}
+
+async function handleBatchStatus(status) {
+  const count = selectedProductIds.value.length
+  if (count === 0) return
+  const action = status === 1 ? '上架' : '下架'
+
+  try {
+    await ElMessageBox.confirm(`确定将选中的 ${count} 个商品批量${action}吗？`, `批量${action}`, {
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+
+  try {
+    const affected = await updateProductStatusBatch(selectedProductIds.value, status)
+    // affected 可能小于请求数：选中的商品里有已被删除的
+    if (affected < count) {
+      ElMessage.warning(`已${action} ${affected} 个，其余 ${count - affected} 个可能已被删除`)
+    } else {
+      ElMessage.success(`已${action} ${affected} 个商品`)
+    }
+    selectedProductIds.value = []
+    await loadProducts()
+  } catch {
+    // 拦截器已提示
+  }
+}
+
+/* ---------- 订单导出 ---------- */
+const exporting = ref(false)
+
+async function handleExportOrders() {
+  exporting.value = true
+  try {
+    // responseType=blob：拦截器识别不出业务响应体，会把原始 Blob 交给这里
+    const blob = await exportOrdersCsv(orderStatus.value || undefined)
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `orders_${new Date().toISOString().slice(0, 10)}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('导出文件已开始下载')
+  } catch {
+    // 拦截器已提示
+  } finally {
+    exporting.value = false
   }
 }
 
@@ -914,11 +973,31 @@ onMounted(() => {
                 </el-select>
                 <el-button type="primary" @click="handleProductSearch">查询</el-button>
               </div>
-              <el-button type="success" @click="openCreateProduct">新增商品</el-button>
+              <div class="bulk-actions">
+                <el-button
+                  :disabled="selectedProductIds.length === 0"
+                  @click="handleBatchStatus(1)"
+                >
+                  批量上架{{ selectedProductIds.length ? `（${selectedProductIds.length}）` : '' }}
+                </el-button>
+                <el-button
+                  :disabled="selectedProductIds.length === 0"
+                  @click="handleBatchStatus(0)"
+                >
+                  批量下架{{ selectedProductIds.length ? `（${selectedProductIds.length}）` : '' }}
+                </el-button>
+                <el-button type="success" @click="openCreateProduct">新增商品</el-button>
+              </div>
             </div>
           </template>
 
-          <el-table v-loading="productLoading" :data="products" empty-text="暂无商品">
+          <el-table
+            v-loading="productLoading"
+            :data="products"
+            empty-text="暂无商品"
+            @selection-change="handleProductSelection"
+          >
+            <el-table-column type="selection" width="46" />
             <el-table-column prop="id" label="ID" width="70" />
             <el-table-column prop="name" label="商品名称" min-width="200" />
             <el-table-column prop="categoryName" label="类目" width="150" />
@@ -1080,7 +1159,10 @@ onMounted(() => {
                 </el-select>
                 <el-button type="primary" @click="handleOrderSearch">查询</el-button>
               </div>
-              <span class="muted">共 {{ orderTotal }} 笔订单</span>
+              <div class="bulk-actions">
+                <span class="muted">共 {{ orderTotal }} 笔订单</span>
+                <el-button :loading="exporting" @click="handleExportOrders">导出 CSV</el-button>
+              </div>
             </div>
           </template>
 
@@ -1536,6 +1618,13 @@ onMounted(() => {
   font-size: 14px;
   color: #c0c4cc;
   cursor: not-allowed;
+}
+
+/* 表头右侧的操作组：批量按钮与导出按钮 */
+.bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 /* ---------- 点击率 ---------- */

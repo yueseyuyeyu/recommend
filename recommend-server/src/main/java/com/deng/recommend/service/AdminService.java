@@ -43,6 +43,30 @@ public interface AdminService {
     void updateProductStatus(Long id, Integer status);
 
     /**
+     * 批量修改商品上下架状态。
+     *
+     * <p>后台整理货架时常见「一次下架几十个过季商品」，逐个调用既慢又容易点漏。
+     * 用一条 UPDATE 完成，避免 N 次往返。
+     *
+     * @param ids    商品 ID 列表，最多 200 个
+     * @param status 1-上架，0-下架
+     * @return 实际影响的商品数
+     */
+    int updateProductStatusBatch(java.util.List<Long> ids, Integer status);
+
+    /**
+     * 导出订单为 CSV。
+     *
+     * <p>用游标分批读取后边查边写，不把整表装进内存——
+     * 订单量到十万级时，一次性 selectList 会直接把堆撑爆。
+     *
+     * @param status 订单状态筛选，null 表示全部
+     * @param out    输出流（由控制器写入响应）
+     * @return 导出的行数
+     */
+    int exportOrders(Integer status, java.io.OutputStream out);
+
+    /**
      * 分页查询商品（后台，含已下架商品）。
      *
      * <p>前台分页接口只返回上架商品，后台需要管理全部商品，

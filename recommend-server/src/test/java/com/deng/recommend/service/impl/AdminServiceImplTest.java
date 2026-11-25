@@ -32,6 +32,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.io.ByteArrayOutputStream;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -214,5 +218,70 @@ class AdminServiceImplTest {
         assertThat(vo.getStatus()).isZero();
         assertThat(vo.getUsername()).isEqualTo("user002");
         assertThat(vo.getToken()).isNull();
+    }
+
+    @Test
+    void updateProductStatusBatch_invalidStatus_throwsParamError() {
+        ThrowingCallable call = () -> adminService.updateProductStatusBatch(List.of(1L), 2);
+        BusinessException ex = (BusinessException) catchThrowable(call);
+        assertThat(ex.getCode()).isEqualTo(ResultCode.PARAM_ERROR.getCode());
+        verifyNoInteractions(productMapper);
+    }
+
+    @Test
+    void updateProductStatusBatch_emptyIds_throwsParamError() {
+        ThrowingCallable call = () -> adminService.updateProductStatusBatch(List.of(), 1);
+        BusinessException ex = (BusinessException) catchThrowable(call);
+        assertThat(ex.getCode()).isEqualTo(ResultCode.PARAM_ERROR.getCode());
+    }
+
+    @Test
+    void updateProductStatusBatch_overLimit_throwsParamError() {
+        List<Long> ids = new ArrayList<>();
+        for (long i = 1; i <= 201; i++) {
+            ids.add(i);
+        }
+        ThrowingCallable call = () -> adminService.updateProductStatusBatch(ids, 1);
+        BusinessException ex = (BusinessException) catchThrowable(call);
+        assertThat(ex.getCode()).isEqualTo(ResultCode.PARAM_ERROR.getCode());
+        assertThat(ex.getMessage()).contains("200");
+    }
+
+    @Test
+    void updateProductStatusBatch_returnsAffectedCount() {
+        when(productMapper.update(isNull(), any(Wrapper.class))).thenReturn(3);
+
+        int affected = adminService.updateProductStatusBatch(List.of(1L, 2L, 5L), 0);
+
+        assertThat(affected).isEqualTo(3);
+    }
+
+    @Test
+    void exportOrders_writesBomAndRows() {
+        Order order = new Order();
+        order.setId(1L);
+        order.setOrderNo("NO20260101000001");
+        order.setStatus(OrderStatus.PAID.getCode());
+        order.setTotalAmount(new BigDecimal("99.50"));
+        order.setReceiverName("张三,李四");
+        // 第一次返回一行，第二次为空表示取完
+        when(orderMapper.selectList(any(Wrapper.class)))
+                .thenReturn(List.of(order))
+                .thenReturn(List.of());
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        int rows = adminService.exportOrders(null, out);
+
+        assertThat(rows).isEqualTo(1);
+        byte[] bytes = out.toByteArray();
+        // UTF-8 BOM：Excel 不加会乱码
+        assertThat(bytes[0] & 0xFF).isEqualTo(0xEF);
+        assertThat(bytes[1] & 0xFF).isEqualTo(0xBB);
+        assertThat(bytes[2] & 0xFF).isEqualTo(0xBF);
+
+        String text = out.toString(StandardCharsets.UTF_8);
+        assertThat(text).contains("订单号").contains("NO20260101000001").contains("已支付");
+        // 含逗号的字段必须被引号包裹，否则列会错位
+        assertThat(text).contains("\"张三,李四\"");
     }
 }
