@@ -2,6 +2,8 @@ package com.deng.recommend.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.deng.recommend.common.BusinessException;
+import com.deng.recommend.common.ResultCode;
 import com.deng.recommend.config.RecommendProperties;
 import com.deng.recommend.entity.Behavior;
 import com.deng.recommend.entity.Product;
@@ -282,7 +284,11 @@ public class RecommendServiceImpl implements RecommendService {
     }
 
     /**
-     * 解析游标，非法输入一律按首页处理，不抛异常。
+     * 解析游标。空游标表示第一页。
+     *
+     * <p>非法游标<b>直接报参数错误</b>，不再静默回退到第一页：
+     * 静默回退会让用户"翻页翻不动、内容反复是第一屏"却看不出原因，
+     * 前端也无法判断该重新加载还是提示错误。
      */
     private int decodeCursor(String cursor) {
         if (cursor == null || cursor.isBlank()) {
@@ -290,11 +296,10 @@ public class RecommendServiceImpl implements RecommendService {
         }
         try {
             String raw = new String(Base64.getUrlDecoder().decode(cursor), StandardCharsets.UTF_8);
-            int offset = Integer.parseInt(raw);
-            return Math.max(0, offset);
+            return Math.max(0, Integer.parseInt(raw));
         } catch (IllegalArgumentException e) {
-            log.warn("推荐流游标非法，按首页处理: {}", cursor);
-            return 0;
+            log.warn("推荐流游标非法: {}", cursor);
+            throw new BusinessException(ResultCode.PARAM_ERROR, "分页游标无效，请重新加载推荐流");
         }
     }
 

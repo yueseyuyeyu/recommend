@@ -1,5 +1,7 @@
 package com.deng.recommend.service.impl;
 
+import com.deng.recommend.common.BusinessException;
+import com.deng.recommend.common.ResultCode;
 import com.deng.recommend.config.RecommendProperties;
 import com.deng.recommend.entity.Product;
 import com.deng.recommend.mapper.BehaviorMapper;
@@ -24,12 +26,14 @@ import java.math.BigDecimal;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -144,5 +148,32 @@ class RecommendServiceImplTest {
         ArgumentCaptor<List<Long>> captor = ArgumentCaptor.forClass(List.class);
         verify(recommendEngine).recommendSimilarRaw(any(), eq(100L), eq(5), captor.capture());
         assertThat(captor.getValue()).contains(100L);
+    }
+
+    @Test
+    void recommendFeed_invalidCursor_throwsParamError() {
+        // 非法游标必须明确报错：静默回退到第一页会让用户以为"翻页没反应"
+        assertThatThrownBy(() -> recommendService.recommendFeed(1L, "%%%invalid%%%", 10))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getCode())
+                .isEqualTo(ResultCode.PARAM_ERROR.getCode());
+    }
+
+    @Test
+    void recommendFeed_blankCursor_isFirstPage() {
+        // 空游标是合法输入，代表第一页，不应抛异常。
+        // 这里的打桩是"备用路径"（候选不足时会回落到底层分页），
+        // 未必全部触发，因此用 lenient 避免严格模式报未使用。
+        lenient().when(recommendEngine.recommendForUser(any(), anyLong(), anyInt(), anyList()))
+                .thenReturn(List.of(new ScoredItem(10L, 1.0, "test")));
+        lenient().when(productMapper.selectBatchIds(anyList())).thenReturn(List.of(product(10L, 1)));
+        lenient().when(categoryService.categoryTopIndex()).thenReturn(java.util.Map.of());
+        // 候选不足时服务会回落到底层商品分页，这里给它一个空页避免 NPE
+        com.baomidou.mybatisplus.extension.plugins.pagination.Page<Product> emptyPage =
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(1, 10);
+        emptyPage.setRecords(List.of());
+        when(productMapper.selectPage(any(), any())).thenReturn(emptyPage);
+
+        assertThat(recommendService.recommendFeed(1L, null, 10)).isNotNull();
     }
 }
