@@ -174,7 +174,30 @@ public class OrderServiceImpl implements OrderService {
                 .orderByDesc(Order::getCreateTime)
                 .orderByDesc(Order::getId);
         Page<Order> page = orderMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
-        List<OrderVO> records = page.getRecords().stream().map(this::toVO).toList();
+
+        List<Order> orders = page.getRecords();
+        if (orders.isEmpty()) {
+            return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), new ArrayList<>());
+        }
+
+        // 一次取回本页所有订单的明细再分组回填。
+        // 原实现是逐单调用 toVO，每条订单都会查一次 order_item——
+        // 一页 5 条就是 1 + 5 次查询，页越大越糟。
+        List<String> orderNos = new ArrayList<>(orders.size());
+        for (Order order : orders) {
+            orderNos.add(order.getOrderNo());
+        }
+        List<OrderItem> allItems = orderItemMapper.selectList(
+                new LambdaQueryWrapper<OrderItem>().in(OrderItem::getOrderNo, orderNos));
+        Map<String, List<OrderItem>> itemsByOrderNo = new LinkedHashMap<>();
+        for (OrderItem item : allItems) {
+            itemsByOrderNo.computeIfAbsent(item.getOrderNo(), k -> new ArrayList<>()).add(item);
+        }
+
+        List<OrderVO> records = new ArrayList<>(orders.size());
+        for (Order order : orders) {
+            records.add(toVO(order, itemsByOrderNo.getOrDefault(order.getOrderNo(), List.of())));
+        }
         return new PageResult<>(page.getCurrent(), page.getSize(), page.getTotal(), records);
     }
 
@@ -400,6 +423,13 @@ public class OrderServiceImpl implements OrderService {
     private OrderVO toVO(Order order) {
         List<OrderItem> items = orderItemMapper.selectList(
                 new LambdaQueryWrapper<OrderItem>().eq(OrderItem::getOrderNo, order.getOrderNo()));
+        return toVO(order, items);
+    }
+
+    /**
+     * 用已取好的明细组装视图，供列表批量调用，避免逐单查询。
+     */
+    private OrderVO toVO(Order order, List<OrderItem> items) {
         return OrderVO.builder()
                 .orderNo(order.getOrderNo())
                 .totalAmount(order.getTotalAmount())
