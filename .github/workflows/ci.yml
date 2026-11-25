@@ -55,6 +55,10 @@ jobs:
         working-directory: recommend-web
         run: npm ci
 
+      - name: 单元测试
+        working-directory: recommend-web
+        run: npm run test
+
       - name: 生产构建
         working-directory: recommend-web
         run: npm run build
