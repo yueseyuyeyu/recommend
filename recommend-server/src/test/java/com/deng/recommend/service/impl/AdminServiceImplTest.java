@@ -82,6 +82,9 @@ class AdminServiceImplTest {
     @Mock
     private UserStatusCache userStatusCache;
 
+    @Mock
+    private com.deng.recommend.service.CategoryService categoryService;
+
     private AdminServiceImpl adminService;
 
     @BeforeEach
@@ -90,7 +93,7 @@ class AdminServiceImplTest {
         adminService = new AdminServiceImpl(
                 productMapper, categoryMapper, carouselMapper, userMapper, orderMapper, orderItemMapper,
                 behaviorMapper, orderService, orderStatusLogService, notificationService, new OrderProperties(),
-                userStatusCache);
+                userStatusCache, categoryService);
     }
 
     private static BusinessException catchBusinessException(ThrowingCallable callable) {
@@ -188,7 +191,7 @@ class AdminServiceImplTest {
         Category category = new Category();
         category.setId(11L);
         category.setName("手机数码-旗舰");
-        when(categoryMapper.selectList(isNull())).thenReturn(List.of(category));
+        when(categoryService.categoryNameMap()).thenReturn(java.util.Map.of(11L, "手机数码-旗舰"));
 
         PageResult<ProductVO> result = adminService.pageProducts("演示", 0, 1, 10);
 

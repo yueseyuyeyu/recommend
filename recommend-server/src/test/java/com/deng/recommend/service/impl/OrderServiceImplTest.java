@@ -36,6 +36,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -143,7 +144,7 @@ class OrderServiceImplTest {
     @Test
     void create_stockNotEnough_throwsStockNotEnough() {
         when(cartMapper.selectList(any(Wrapper.class))).thenReturn(List.of(cart(500L, 100L, 3)));
-        when(productMapper.selectById(100L)).thenReturn(product(100L, BigDecimal.TEN, 2));
+        when(productMapper.selectBatchIds(anyList())).thenReturn(List.of(product(100L, BigDecimal.TEN, 2)));
 
         BusinessException ex = catchBusinessException(() -> orderService.create(1L, createRequest()));
 
@@ -154,7 +155,7 @@ class OrderServiceImplTest {
     @Test
     void create_stockDeductionAffectsZeroRows_throwsStockNotEnough() {
         when(cartMapper.selectList(any(Wrapper.class))).thenReturn(List.of(cart(500L, 100L, 1)));
-        when(productMapper.selectById(100L)).thenReturn(product(100L, BigDecimal.TEN, 10));
+        when(productMapper.selectBatchIds(anyList())).thenReturn(List.of(product(100L, BigDecimal.TEN, 10)));
         when(productMapper.update(isNull(), any(Wrapper.class))).thenReturn(0);
 
         BusinessException ex = catchBusinessException(() -> orderService.create(1L, createRequest()));
@@ -168,7 +169,7 @@ class OrderServiceImplTest {
     @SuppressWarnings("unchecked")
     void create_success_writesOrderItemsPurchaseAndClearsCart() {
         when(cartMapper.selectList(any(Wrapper.class))).thenReturn(List.of(cart(500L, 100L, 2)));
-        when(productMapper.selectById(100L)).thenReturn(product(100L, BigDecimal.TEN, 10));
+        when(productMapper.selectBatchIds(anyList())).thenReturn(List.of(product(100L, BigDecimal.TEN, 10)));
         when(productMapper.update(isNull(), any(Wrapper.class))).thenReturn(1);
         when(orderMapper.insert(any(Order.class))).thenReturn(1);
         when(orderItemMapper.insert(any(OrderItem.class))).thenReturn(1);

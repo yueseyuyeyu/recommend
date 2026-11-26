@@ -68,8 +68,16 @@ public class RecommendServiceImpl implements RecommendService {
     private final Map<String, CachedPool> poolCache = new ConcurrentHashMap<>();
 
     /** 缓存条目，用 record 保证不可变 */
-    private record CachedPool(List<ScoredItem> items, long expireAt) {
+    private record CachedPool(List<ScoredItem> items, long total, long expireAt) {
     }
+
+    /** 下架商品清单缓存：下架是低频管理操作，不必每次推荐请求都查一遍 */
+    private volatile List<Long> offShelfCache;
+
+    private volatile long offShelfCacheAt;
+
+    /** 下架清单缓存时长：与类目名缓存同策略，变更后最多 60 秒生效 */
+    private static final long OFF_SHELF_CACHE_MS = 60_000L;
 
     @Override
     public List<RecommendVO> recommendForUser(Long userId, int topN) {
@@ -203,8 +211,9 @@ public class RecommendServiceImpl implements RecommendService {
         int size = Math.min(Math.max(1, pageSize), 50);
         int offset = decodeCursor(cursor);
 
-        List<ScoredItem> pool = getRankedPool(userId);
-        long total = countOnSaleProducts();
+        CachedPool ranked = getRankedPool(userId);
+        List<ScoredItem> pool = ranked.items();
+        long total = ranked.total();
 
         if (offset >= pool.size()) {
             return FeedPageVO.builder()
@@ -228,30 +237,36 @@ public class RecommendServiceImpl implements RecommendService {
     }
 
     /**
-     * 取当前用户的排行池，命中缓存时直接返回。
+     * 取当前用户的排行池（连同在售总数），命中缓存时直接返回。
      *
      * <p>这是游标分页能做到「翻到多深都只花一次切片时间」的关键：
      * 昂贵的算法只跑一次，后续翻页退化为内存 subList。
+     * 在售总数跟池一起缓存——它随池过期一起刷新，
+     * 翻页请求不再每次都跑一条 COUNT。
      */
-    private List<ScoredItem> getRankedPool(Long userId) {
+    private CachedPool getRankedPool(Long userId) {
         String key = userId == null ? GUEST_CACHE_KEY : String.valueOf(userId);
         long now = System.currentTimeMillis();
 
         CachedPool cached = poolCache.get(key);
         if (properties.isEnableCache() && cached != null && cached.expireAt() > now) {
-            return cached.items();
+            return cached;
         }
 
         List<ScoredItem> pool = buildRankedPool(userId);
+        long total = countOnSaleProducts();
 
         if (properties.isEnableCache()) {
             // 简单防膨胀：条目过多时整体清空，比逐个清理更省事
             if (poolCache.size() > MAX_CACHE_ENTRIES) {
                 poolCache.clear();
             }
-            poolCache.put(key, new CachedPool(pool, now + properties.getCacheTtlSeconds() * 1000L));
+            cached = new CachedPool(pool, total, now + properties.getCacheTtlSeconds() * 1000L);
+            poolCache.put(key, cached);
+        } else {
+            cached = new CachedPool(pool, total, 0);
         }
-        return pool;
+        return cached;
     }
 
     /**
@@ -360,6 +375,11 @@ public class RecommendServiceImpl implements RecommendService {
     }
 
     private List<Long> findOffShelfProductIds() {
+        long now = System.currentTimeMillis();
+        List<Long> cached = offShelfCache;
+        if (cached != null && now - offShelfCacheAt < OFF_SHELF_CACHE_MS) {
+            return cached;
+        }
         List<Product> offShelf = productMapper.selectList(new LambdaQueryWrapper<Product>()
                 .eq(Product::getStatus, 0)
                 .select(Product::getId));
@@ -367,6 +387,8 @@ public class RecommendServiceImpl implements RecommendService {
         for (Product product : offShelf) {
             ids.add(product.getId());
         }
+        offShelfCache = ids;
+        offShelfCacheAt = now;
         return ids;
     }
 

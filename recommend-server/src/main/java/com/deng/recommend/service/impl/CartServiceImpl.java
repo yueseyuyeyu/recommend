@@ -18,7 +18,9 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -82,9 +84,13 @@ public class CartServiceImpl implements CartService {
             return Collections.emptyList();
         }
 
+        // 一次批量取回本页所有商品，避免逐条 selectById 的 N+1——
+        // 原实现购物车放 N 件商品就是 1+N 次查询，实测 3 件商品 4 条 SQL
+        Map<Long, Product> productMap = loadProducts(carts);
+
         List<CartVO> result = new ArrayList<>(carts.size());
         for (Cart cart : carts) {
-            Product product = productMapper.selectById(cart.getProductId());
+            Product product = productMap.get(cart.getProductId());
             BigDecimal price = product == null || product.getPrice() == null ? BigDecimal.ZERO : product.getPrice();
             result.add(CartVO.builder()
                     .id(cart.getId())
@@ -131,15 +137,41 @@ public class CartServiceImpl implements CartService {
         List<Cart> checkedCarts = cartMapper.selectList(new LambdaQueryWrapper<Cart>()
                 .eq(Cart::getUserId, userId)
                 .eq(Cart::getChecked, 1));
+        Map<Long, Product> productMap = loadProducts(checkedCarts);
         BigDecimal total = BigDecimal.ZERO;
         for (Cart cart : checkedCarts) {
-            Product product = productMapper.selectById(cart.getProductId());
+            Product product = productMap.get(cart.getProductId());
             if (product == null || product.getPrice() == null) {
                 continue;
             }
             total = total.add(product.getPrice().multiply(BigDecimal.valueOf(nullSafe(cart.getQuantity()))));
         }
         return total;
+    }
+
+    /**
+     * 按购物车条目批量取回商品，构建 productId → Product 映射。
+     *
+     * <p>无论多少条购物车记录都只产生一条 IN 查询，消除逐条 selectById 的 N+1。
+     */
+    private Map<Long, Product> loadProducts(List<Cart> carts) {
+        Map<Long, Product> productMap = new LinkedHashMap<>();
+        if (carts == null || carts.isEmpty()) {
+            return productMap;
+        }
+        List<Long> productIds = new ArrayList<>(carts.size());
+        for (Cart cart : carts) {
+            if (cart.getProductId() != null && !productIds.contains(cart.getProductId())) {
+                productIds.add(cart.getProductId());
+            }
+        }
+        if (productIds.isEmpty()) {
+            return productMap;
+        }
+        for (Product product : productMapper.selectBatchIds(productIds)) {
+            productMap.put(product.getId(), product);
+        }
+        return productMap;
     }
 
     /**

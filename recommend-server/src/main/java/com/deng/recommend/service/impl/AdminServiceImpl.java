@@ -28,6 +28,7 @@ import com.deng.recommend.mapper.ProductMapper;
 import com.deng.recommend.mapper.UserMapper;
 import com.deng.recommend.security.UserStatusCache;
 import com.deng.recommend.service.AdminService;
+import com.deng.recommend.service.CategoryService;
 import com.deng.recommend.service.NotificationService;
 import com.deng.recommend.service.OrderService;
 import com.deng.recommend.service.OrderStatusLogService;
@@ -90,6 +91,7 @@ public class AdminServiceImpl implements AdminService {
     private final NotificationService notificationService;
     private final OrderProperties orderProperties;
     private final UserStatusCache userStatusCache;
+    private final CategoryService categoryService;
 
     /** 类目最大层级：一级 → 二级 → 三级 */
     private static final int MAX_CATEGORY_LEVEL = 3;
@@ -244,9 +246,8 @@ public class AdminServiceImpl implements AdminService {
                 .orderByDesc(Product::getId);
         Page<Product> page = productMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
 
-        // 类目表规模很小，一次查全量做内存映射，避免逐行联表
-        Map<Long, String> categoryNames = categoryMapper.selectList(null).stream()
-                .collect(Collectors.toMap(Category::getId, Category::getName));
+        // 复用类目服务的名称映射（60 秒 TTL 快照），不再每请求全量查类目表
+        Map<Long, String> categoryNames = categoryService.categoryNameMap();
         List<ProductVO> records = page.getRecords().stream()
                 .map(product -> {
                     ProductVO vo = ProductVO.from(product);
@@ -278,6 +279,8 @@ public class AdminServiceImpl implements AdminService {
         } else {
             categoryMapper.updateById(category);
         }
+        // 类目快照缓存主动失效，名称映射与子孙索引立即反映变更
+        categoryService.evictCaches();
         return category.getId();
     }
 
@@ -293,6 +296,7 @@ public class AdminServiceImpl implements AdminService {
             throw new BusinessException(ResultCode.PARAM_ERROR, "该类目下仍有商品，无法删除");
         }
         categoryMapper.deleteById(id);
+        categoryService.evictCaches();
     }
 
     @Override

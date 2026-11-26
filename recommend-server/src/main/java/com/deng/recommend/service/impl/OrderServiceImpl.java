@@ -84,11 +84,24 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException(ResultCode.CART_EMPTY);
         }
 
-        // 下单前统一校验商品状态与库存，并缓存商品快照用于后续落明细
+        // 下单前统一校验商品状态与库存：一次 IN 批量取回全部勾选商品，
+        // 替代逐条 selectById 的 N+1（勾选 N 件原本就是 1+N 次查询），
+        // 商品快照缓存在 productMap 供后续落明细复用
         Map<Long, Product> productMap = new LinkedHashMap<>();
         BigDecimal totalAmount = BigDecimal.ZERO;
+        {
+            List<Long> productIds = new ArrayList<>(carts.size());
+            for (Cart cart : carts) {
+                if (cart.getProductId() != null && !productIds.contains(cart.getProductId())) {
+                    productIds.add(cart.getProductId());
+                }
+            }
+            for (Product product : productMapper.selectBatchIds(productIds)) {
+                productMap.put(product.getId(), product);
+            }
+        }
         for (Cart cart : carts) {
-            Product product = productMapper.selectById(cart.getProductId());
+            Product product = productMap.get(cart.getProductId());
             if (product == null || !product.isOnSale()) {
                 throw new BusinessException(ResultCode.PRODUCT_OFF_SHELF);
             }
@@ -97,7 +110,6 @@ public class OrderServiceImpl implements OrderService {
             if (stock < quantity) {
                 throw new BusinessException(ResultCode.STOCK_NOT_ENOUGH);
             }
-            productMap.put(product.getId(), product);
             totalAmount = totalAmount.add(product.getPrice().multiply(BigDecimal.valueOf(quantity)));
         }
 

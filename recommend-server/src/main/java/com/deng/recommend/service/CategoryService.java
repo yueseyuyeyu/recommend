@@ -41,4 +41,21 @@ public interface CategoryService {
      * @return 一级类目自己的 value 也是它自己
      */
     java.util.Map<Long, Long> categoryTopIndex();
+
+    /**
+     * 全量「类目 ID → 类目名称」映射（带短 TTL 缓存）。
+     *
+     * <p>商品列表、管理端商品分页都要把 categoryId 翻译成名称，
+     * 类目是低频变更数据，没必要每次分页都全量查一遍。
+     *
+     * @return 不可变视图的快照，类目变更后最多一个 TTL 周期生效
+     */
+    java.util.Map<Long, String> categoryNameMap();
+
+    /**
+     * 主动失效类目快照缓存。
+     *
+     * <p>管理端新增/修改/删除类目后调用，避免名称与树结构在 TTL 内保持旧值。
+     */
+    void evictCaches();
 }
