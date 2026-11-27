@@ -31,20 +31,9 @@ const avatarText = computed(() => {
 })
 
 /** 登录状态变化时同步收藏数据：登录则加载，退出则清空 */
-watch(
-  () => userStore.isLoggedIn,
-  (loggedIn) => {
-    if (loggedIn) {
-      favoriteStore.load()
-      refreshUnread()
-    } else {
-      favoriteStore.reset()
-      notifications.value = []
-      unreadCount.value = 0
-    }
-  },
-  { immediate: true }
-)
+// 注意：watch 必须放在 notifications 等声明之后——immediate: true 会同步执行
+// 回调，若在 const notifications 声明前触发就是 TDZ 错误（白屏）。
+// watch 块移至「站内通知」区块定义之后。
 
 async function handleLogout() {
   // 先请求服务端注销，让令牌进入黑名单立即失效。
@@ -80,6 +69,22 @@ async function refreshUnread() {
     unreadCount.value = 0
   }
 }
+
+/** 登录状态变化时同步收藏与通知：登录则加载，退出则清空（immediate 立即跑一次） */
+watch(
+  () => userStore.isLoggedIn,
+  (loggedIn) => {
+    if (loggedIn) {
+      favoriteStore.load()
+      refreshUnread()
+    } else {
+      favoriteStore.reset()
+      notifications.value = []
+      unreadCount.value = 0
+    }
+  },
+  { immediate: true }
+)
 
 async function loadNotifications() {
   if (!userStore.isLoggedIn) return
