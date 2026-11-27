@@ -29,6 +29,7 @@ import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -193,7 +194,7 @@ class AdminServiceImplTest {
         category.setName("手机数码-旗舰");
         when(categoryService.categoryNameMap()).thenReturn(java.util.Map.of(11L, "手机数码-旗舰"));
 
-        PageResult<ProductVO> result = adminService.pageProducts("演示", 0, 1, 10);
+        PageResult<ProductVO> result = adminService.pageProducts("演示", 0, "asc", 1, 10);
 
         assertThat(result.getTotal()).isEqualTo(1L);
         assertThat(result.getRecords()).hasSize(1);
@@ -215,12 +216,56 @@ class AdminServiceImplTest {
         page.setTotal(1L);
         when(userMapper.selectPage(any(Page.class), any(Wrapper.class))).thenReturn(page);
 
-        PageResult<UserVO> result = adminService.pageUsers("user", 1, 10);
+        PageResult<UserVO> result = adminService.pageUsers("user", "asc", 1, 10);
 
         UserVO vo = result.getRecords().get(0);
         assertThat(vo.getStatus()).isZero();
         assertThat(vo.getUsername()).isEqualTo("user002");
         assertThat(vo.getToken()).isNull();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void pageUsers_defaultOrder_sortsByIdAsc() {
+        Page<User> page = new Page<>(1, 10);
+        page.setRecords(List.of());
+        page.setTotal(0L);
+        ArgumentCaptor<Wrapper> captor = ArgumentCaptor.forClass(Wrapper.class);
+        when(userMapper.selectPage(any(Page.class), captor.capture())).thenReturn(page);
+
+        adminService.pageUsers(null, null, 1, 10);
+
+        assertThat(captor.getValue().getSqlSegment()).containsIgnoringCase("ORDER BY id ASC");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void pageUsers_descOrder_sortsByIdDesc() {
+        Page<User> page = new Page<>(1, 10);
+        page.setRecords(List.of());
+        page.setTotal(0L);
+        ArgumentCaptor<Wrapper> captor = ArgumentCaptor.forClass(Wrapper.class);
+        when(userMapper.selectPage(any(Page.class), captor.capture())).thenReturn(page);
+
+        adminService.pageUsers(null, "desc", 1, 10);
+
+        assertThat(captor.getValue().getSqlSegment()).containsIgnoringCase("ORDER BY id DESC");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void pageProducts_illegalSortOrder_fallsBackToAsc() {
+        Page<Product> page = new Page<>(1, 10);
+        page.setRecords(List.of());
+        page.setTotal(0L);
+        ArgumentCaptor<Wrapper> captor = ArgumentCaptor.forClass(Wrapper.class);
+        when(productMapper.selectPage(any(Page.class), captor.capture())).thenReturn(page);
+        when(categoryService.categoryNameMap()).thenReturn(java.util.Map.of());
+
+        // 非法值不能拼进 SQL，也不能报错，一律回落到升序
+        adminService.pageProducts(null, null, "id; drop table user", 1, 10);
+
+        assertThat(captor.getValue().getSqlSegment()).containsIgnoringCase("ORDER BY id ASC");
     }
 
     @Test

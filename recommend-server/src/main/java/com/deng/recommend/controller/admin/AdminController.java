@@ -79,9 +79,10 @@ public class AdminController {
     @GetMapping("/products")
     public Result<PageResult<ProductVO>> pageProducts(@RequestParam(required = false) String keyword,
                                                      @RequestParam(required = false) Integer status,
+                                                     @RequestParam(defaultValue = "asc") String sortOrder,
                                                      @RequestParam(defaultValue = "1") long pageNum,
                                                      @RequestParam(defaultValue = "20") long pageSize) {
-        return Result.success(adminService.pageProducts(keyword, status, pageNum, pageSize));
+        return Result.success(adminService.pageProducts(keyword, status, sortOrder, pageNum, pageSize));
     }
 
     @PutMapping("/products/{id}/status")
@@ -103,9 +104,10 @@ public class AdminController {
 
     @GetMapping("/users")
     public Result<PageResult<UserVO>> pageUsers(@RequestParam(required = false) String keyword,
+                                                @RequestParam(defaultValue = "asc") String sortOrder,
                                                 @RequestParam(defaultValue = "1") long pageNum,
                                                 @RequestParam(defaultValue = "20") long pageSize) {
-        return Result.success(adminService.pageUsers(keyword, pageNum, pageSize));
+        return Result.success(adminService.pageUsers(keyword, sortOrder, pageNum, pageSize));
     }
 
     @PutMapping("/users/{id}/status")

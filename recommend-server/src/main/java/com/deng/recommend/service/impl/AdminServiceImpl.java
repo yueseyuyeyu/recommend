@@ -238,12 +238,19 @@ public class AdminServiceImpl implements AdminService {
     }
 
     @Override
-    public PageResult<ProductVO> pageProducts(String keyword, Integer status, long pageNum, long pageSize) {
+    public PageResult<ProductVO> pageProducts(String keyword, Integer status, String sortOrder,
+                                              long pageNum, long pageSize) {
+        // 后台按 ID 排序：ID 是自增主键，天然连续，不会出现按创建时间排序时
+        // 「同一秒创建的多条记录 ID 交错」的观感混乱。方向由前端表头切换。
+        boolean desc = isDesc(sortOrder);
         LambdaQueryWrapper<Product> wrapper = new LambdaQueryWrapper<Product>()
                 .like(StringUtils.hasText(keyword), Product::getName, keyword)
-                .eq(status != null, Product::getStatus, status)
-                .orderByDesc(Product::getCreateTime)
-                .orderByDesc(Product::getId);
+                .eq(status != null, Product::getStatus, status);
+        if (desc) {
+            wrapper.orderByDesc(Product::getId);
+        } else {
+            wrapper.orderByAsc(Product::getId);
+        }
         Page<Product> page = productMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
 
         // 复用类目服务的名称映射（60 秒 TTL 快照），不再每请求全量查类目表
@@ -300,12 +307,17 @@ public class AdminServiceImpl implements AdminService {
     }
 
     @Override
-    public PageResult<UserVO> pageUsers(String keyword, long pageNum, long pageSize) {
+    public PageResult<UserVO> pageUsers(String keyword, String sortOrder, long pageNum, long pageSize) {
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
         if (StringUtils.hasText(keyword)) {
             wrapper.and(w -> w.like(User::getUsername, keyword).or().like(User::getNickname, keyword));
         }
-        wrapper.orderByDesc(User::getCreateTime);
+        // 与商品一致：按自增 ID 排序，方向可切换，保证列表顺序连续可预期
+        if (isDesc(sortOrder)) {
+            wrapper.orderByDesc(User::getId);
+        } else {
+            wrapper.orderByAsc(User::getId);
+        }
 
         Page<User> page = userMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
         List<UserVO> records = page.getRecords().stream()
@@ -506,6 +518,15 @@ public class AdminServiceImpl implements AdminService {
         } catch (IllegalArgumentException e) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "未知的订单状态: " + status);
         }
+    }
+
+    /**
+     * 解析排序方向：只有明确传 {@code desc} 才降序，其余（含 null、空串、非法值）一律升序。
+     *
+     * <p>白名单式判断而非直接拼进 SQL，避免任何外部输入影响排序字段。
+     */
+    private boolean isDesc(String sortOrder) {
+        return "desc".equalsIgnoreCase(sortOrder == null ? null : sortOrder.trim());
     }
 
     private Map<String, List<OrderItemVO>> loadItems(List<String> orderNos) {

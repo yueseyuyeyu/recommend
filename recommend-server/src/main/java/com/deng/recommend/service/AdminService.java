@@ -74,11 +74,13 @@ public interface AdminService {
      *
      * @param keyword  商品名称关键字，可为空
      * @param status   上下架状态，为空表示不限
+     * @param sortOrder 按 ID 排序方向：{@code asc}（默认）或 {@code desc}
      * @param pageNum  页码
      * @param pageSize 每页条数
      * @return 分页商品列表，含类目名称
      */
-    PageResult<ProductVO> pageProducts(String keyword, Integer status, long pageNum, long pageSize);
+    PageResult<ProductVO> pageProducts(String keyword, Integer status, String sortOrder,
+                                       long pageNum, long pageSize);
 
     /**
      * 新增或更新类目。
@@ -99,11 +101,12 @@ public interface AdminService {
      * 分页查询用户（后台）。
      *
      * @param keyword  用户名或昵称关键字，可为空
+     * @param sortOrder 按 ID 排序方向：{@code asc}（默认）或 {@code desc}
      * @param pageNum  页码
      * @param pageSize 每页条数
      * @return 分页用户列表
      */
-    PageResult<UserVO> pageUsers(String keyword, long pageNum, long pageSize);
+    PageResult<UserVO> pageUsers(String keyword, String sortOrder, long pageNum, long pageSize);
 
     /**
      * 启用或禁用用户。

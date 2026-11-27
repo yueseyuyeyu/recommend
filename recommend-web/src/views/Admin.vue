@@ -222,6 +222,8 @@ const products = ref([])
 const productTotal = ref(0)
 const productPage = ref(1)
 const productPageSize = ref(10)
+// 按 ID 排序方向，表头点击切换；默认升序，保证 ID 连续可读
+const productSortOrder = ref('asc')
 const productLoading = ref(false)
 const productSaving = ref(false)
 const productDialog = ref(false)
@@ -246,6 +248,7 @@ async function loadProducts() {
     const data = await getAdminProducts({
       keyword: productFilter.keyword.trim() || undefined,
       status: productFilter.status === '' ? undefined : productFilter.status,
+      sortOrder: productSortOrder.value,
       pageNum: productPage.value,
       pageSize: productPageSize.value
     })
@@ -257,6 +260,17 @@ async function loadProducts() {
   } finally {
     productLoading.value = false
   }
+}
+
+/**
+ * 表头点击切换 ID 排序：Element Plus 传 ascending / descending / null，
+ * 取消排序（null）时回到默认升序，避免出现"点了没反应"的空状态。
+ */
+function handleProductSortChange({ prop, order }) {
+  if (prop !== 'id') return
+  productSortOrder.value = order === 'descending' ? 'desc' : 'asc'
+  productPage.value = 1
+  loadProducts()
 }
 
 function handleProductSearch() {
@@ -481,12 +495,15 @@ const userPage = ref(1)
 const userPageSize = ref(10)
 const userLoading = ref(false)
 const userKeyword = ref('')
+// 用户列表同样按 ID 排序，方向由表头切换
+const userSortOrder = ref('asc')
 
 async function loadUsers() {
   userLoading.value = true
   try {
     const data = await getAdminUsers({
       keyword: userKeyword.value.trim() || undefined,
+      sortOrder: userSortOrder.value,
       pageNum: userPage.value,
       pageSize: userPageSize.value
     })
@@ -498,6 +515,14 @@ async function loadUsers() {
   } finally {
     userLoading.value = false
   }
+}
+
+/** 用户表头点击切换 ID 升降序，口径与商品列表一致 */
+function handleUserSortChange({ prop, order }) {
+  if (prop !== 'id') return
+  userSortOrder.value = order === 'descending' ? 'desc' : 'asc'
+  userPage.value = 1
+  loadUsers()
 }
 
 function handleUserSearch() {
@@ -995,10 +1020,12 @@ onMounted(() => {
             v-loading="productLoading"
             :data="products"
             empty-text="暂无商品"
+            :default-sort="{ prop: 'id', order: productSortOrder === 'asc' ? 'ascending' : 'descending' }"
             @selection-change="handleProductSelection"
+            @sort-change="handleProductSortChange"
           >
             <el-table-column type="selection" width="46" />
-            <el-table-column prop="id" label="ID" width="70" />
+            <el-table-column prop="id" label="ID" width="90" sortable="custom" />
             <el-table-column prop="name" label="商品名称" min-width="200" />
             <el-table-column prop="categoryName" label="类目" width="150" />
             <el-table-column label="价格" width="110">
@@ -1052,7 +1079,6 @@ onMounted(() => {
             :data="categories"
             row-key="id"
             :tree-props="{ children: 'children' }"
-            default-expand-all
             empty-text="暂无类目"
           >
             <el-table-column prop="name" label="类目名称" min-width="220" />
@@ -1102,8 +1128,10 @@ onMounted(() => {
             </div>
           </template>
 
-          <el-table v-loading="userLoading" :data="users" empty-text="暂无用户">
-            <el-table-column prop="id" label="ID" width="70" />
+          <el-table v-loading="userLoading" :data="users" empty-text="暂无用户"
+            :default-sort="{ prop: 'id', order: userSortOrder === 'asc' ? 'ascending' : 'descending' }"
+            @sort-change="handleUserSortChange">
+            <el-table-column prop="id" label="ID" width="90" sortable="custom" />
             <el-table-column prop="username" label="用户名" width="140" />
             <el-table-column prop="nickname" label="昵称" width="140" />
             <el-table-column prop="email" label="邮箱" min-width="200" />
