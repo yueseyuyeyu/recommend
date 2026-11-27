@@ -6,6 +6,10 @@ export default defineConfig({
   plugins: [vue()],
   server: {
     port: 5173,
+    // 显式监听所有地址（含 IPv4 127.0.0.1 与 IPv6 ::1）。
+    // 不设 host 时 Node 17+ 会把 localhost 解析成 ::1，dev server 只绑 IPv6，
+    // 用 127.0.0.1:5173 访问会直接「无法访问此网站」。
+    host: true,
     proxy: {
       '/api': {
         target: 'http://localhost:8080',
